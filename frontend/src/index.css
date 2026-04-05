@@ -1,0 +1,38 @@
+@import url('https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-background text-secondary font-sans antialiased;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-white border border-slate-200/80 shadow-soft;
+  }
+
+  .dashboard-card {
+    @apply bg-white rounded-xl shadow-soft hover:shadow-premium transition-all duration-300 border border-slate-200/90;
+  }
+
+  .btn-primary {
+    @apply bg-primary hover:bg-[#152a45] text-white font-bold text-xs uppercase tracking-widest py-4 px-8 rounded-lg shadow-md shadow-slate-900/10 active:scale-[0.98] transition-all disabled:opacity-50;
+  }
+
+  .btn-secondary {
+    @apply bg-white hover:bg-slate-50 text-secondary border border-slate-300 font-bold text-xs uppercase tracking-widest py-4 px-8 rounded-lg active:scale-[0.98] transition-all;
+  }
+
+  .input-field {
+    @apply w-full bg-white border border-slate-300 p-4 rounded-lg focus:bg-white focus:border-primary focus:ring-2 focus:ring-primary/20 outline-none transition-all font-medium text-slate-800 text-sm;
+  }
+
+  /* Formal government-style page header band */
+  .gov-page-header {
+    @apply border-b-4 border-b-[#c2410c] bg-gradient-to-r from-sidebar via-govstrip to-sidebar text-white;
+  }
+}
