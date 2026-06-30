@@ -6,6 +6,7 @@ import 'react-toastify/dist/ReactToastify.css';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ProtectedRoute } from './routes/ProtectedRoutes';
 import DashboardLayout from './layouts/DashboardLayout';
+import ErrorBoundary from './components/ErrorBoundary';
 
 import Home from './pages/Home';
 import PublicDashboard from './pages/PublicDashboard';
@@ -15,6 +16,7 @@ import AdminDashboard from './pages/AdminDashboard';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
+import WorkerResetPassword from './pages/WorkerResetPassword';
 import ComplaintDetails from './pages/ComplaintDetails';
 
 const AppRoutes = () => {
@@ -37,6 +39,7 @@ const AppRoutes = () => {
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/worker-reset-password" element={<WorkerResetPassword />} />
 
       {/* Public Dashboard & Features */}
       <Route path="/user-dashboard" element={
@@ -77,26 +80,28 @@ const AppRoutes = () => {
 
 function App() {
   return (
-    <Router>
-      <AuthProvider>
-        <div className="min-h-screen bg-background font-sans text-secondary selection:bg-blue-100 selection:text-primary">
-          <AppRoutes />
-          <ToastContainer 
-            position="bottom-right" 
-            autoClose={3000} 
-            hideProgressBar={false}
-            newestOnTop
-            closeOnClick
-            rtl={false}
-            pauseOnFocusLoss
-            draggable
-            pauseOnHover
-            theme="light"
-            toastClassName="!rounded-2xl !shadow-premium !border-slate-100 !font-bold !text-xs !uppercase !tracking-widest"
-          />
-        </div>
-      </AuthProvider>
-    </Router>
+    <ErrorBoundary>
+      <Router>
+        <AuthProvider>
+          <div className="min-h-screen bg-background font-sans text-secondary selection:bg-blue-100 selection:text-primary">
+            <AppRoutes />
+            <ToastContainer 
+              position="bottom-right" 
+              autoClose={3000} 
+              hideProgressBar={false}
+              newestOnTop
+              closeOnClick
+              rtl={false}
+              pauseOnFocusLoss
+              draggable
+              pauseOnHover
+              theme="light"
+              toastClassName="!rounded-2xl !shadow-premium !border-slate-100 !font-bold !text-xs !uppercase !tracking-widest"
+            />
+          </div>
+        </AuthProvider>
+      </Router>
+    </ErrorBoundary>
   );
 }
 

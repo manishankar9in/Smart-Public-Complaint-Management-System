@@ -1,4 +1,6 @@
-"""Worker accounts: MongoDB + bcrypt + JWT (no Firebase)."""
+"""Worker accounts: profile in workers collection, credentials in login_credentials (JWT, no Firebase)."""
+import logging
+import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -12,9 +14,14 @@ from pydantic import BaseModel, EmailStr, Field
 
 from config import settings
 from database.db import get_database
+from services.email_service import send_worker_password_reset_email, smtp_configured
+from services import credentials as cred_service
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 security = HTTPBearer(auto_error=False)
+
+RESET_TOKEN_HOURS = 1
 
 DUTY_POSITIONS = [
     "Electricity",
@@ -81,10 +88,19 @@ class WorkerLogin(BaseModel):
     password: str
 
 
+class WorkerForgotPassword(BaseModel):
+    email: EmailStr
+
+
+class WorkerResetPassword(BaseModel):
+    token: str = Field(min_length=10)
+    new_password: str = Field(min_length=6)
+
+
 def _serialize_worker(doc: dict) -> dict:
     wid = str(doc["_id"])
     return {
-        "worker_uid": wid,
+        "worker_uid": doc.get("worker_uid") or wid,
         "email": doc.get("email"),
         "name": doc.get("name"),
         "role": "worker",
@@ -96,25 +112,35 @@ def _serialize_worker(doc: dict) -> dict:
         "village": doc.get("village"),
         "phone": doc.get("phone"),
         "department": doc.get("department"),
+        "complaints_solved": doc.get("complaints_solved", 0),
     }
+
+
+async def _ensure_worker_email_available(db, email_norm: str):
+    if await db.workers.find_one({"email": email_norm}):
+        raise HTTPException(status_code=400, detail="Email already registered for worker access")
+    if await db.users.find_one({"email": email_norm}):
+        raise HTTPException(status_code=400, detail="Email already registered as a public user")
+    if await db.admins.find_one({"email": email_norm}):
+        raise HTTPException(status_code=400, detail="Email already registered as an admin")
+    conflict = await cred_service.email_exists_in_credentials(db, email_norm)
+    if conflict:
+        raise HTTPException(status_code=400, detail=f"Email already registered as {conflict}")
 
 
 @router.post("/register")
 async def register_worker(body: WorkerRegister):
-    if body.duty_position not in DUTY_POSITIONS:
+    if not body.duty_position or not body.duty_position.strip():
         raise HTTPException(
             status_code=400,
-            detail=f"duty_position must be one of: {', '.join(DUTY_POSITIONS)}",
+            detail="duty_position is required and cannot be empty",
         )
     db = await get_database()
     email_norm = body.email.strip().lower()
-    exists = await db.workers.find_one({"email": email_norm})
-    if exists:
-        raise HTTPException(status_code=400, detail="Email already registered for worker access")
+    await _ensure_worker_email_available(db, email_norm)
 
     doc = {
         "email": email_norm,
-        "password_hash": _hash_password(body.password),
         "name": body.name.strip(),
         "duty_position": body.duty_position,
         "state": body.state,
@@ -123,13 +149,24 @@ async def register_worker(body: WorkerRegister):
         "street": body.street,
         "village": body.village,
         "phone": body.phone,
+        "complaints_solved": 0,
         "created_at": datetime.utcnow(),
         "updated_at": datetime.utcnow(),
     }
     result = await db.workers.insert_one(doc)
     worker_uid = str(result.inserted_id)
+    await db.workers.update_one(
+        {"_id": result.inserted_id},
+        {"$set": {"worker_uid": worker_uid}},
+    )
+
+    await cred_service.create_worker_credentials(
+        db, worker_uid, email_norm, _hash_password(body.password)
+    )
+
     token = create_worker_token(worker_uid)
     doc["_id"] = result.inserted_id
+    doc["worker_uid"] = worker_uid
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -141,11 +178,18 @@ async def register_worker(body: WorkerRegister):
 async def login_worker(body: WorkerLogin):
     db = await get_database()
     email_norm = body.email.strip().lower()
-    doc = await db.workers.find_one({"email": email_norm})
-    if not doc or not _verify_password(body.password, doc.get("password_hash", "")):
+    cred = await cred_service.get_worker_credentials(db, email_norm)
+    if not cred or not _verify_password(body.password, cred.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Invalid email or password")
 
-    worker_uid = str(doc["_id"])
+    worker_uid = cred["account_id"]
+    try:
+        doc = await db.workers.find_one({"_id": ObjectId(worker_uid)})
+    except Exception:
+        doc = None
+    if not doc:
+        raise HTTPException(status_code=404, detail="Worker profile not found")
+
     token = create_worker_token(worker_uid)
     return {
         "access_token": token,
@@ -170,3 +214,61 @@ async def worker_me(worker_uid: str = Depends(get_worker_uid_from_token)):
 @router.get("/duty-options")
 async def duty_options():
     return {"duty_positions": DUTY_POSITIONS}
+
+
+@router.post("/forgot-password")
+async def worker_forgot_password(body: WorkerForgotPassword):
+    """Send password reset link to worker's registered email."""
+    db = await get_database()
+    email_norm = body.email.strip().lower()
+    cred = await cred_service.get_worker_credentials(db, email_norm)
+    doc = None
+    if cred:
+        try:
+            doc = await db.workers.find_one({"_id": ObjectId(cred["account_id"])})
+        except Exception:
+            doc = None
+
+    reset_link = None
+    if doc and cred:
+        token = secrets.token_urlsafe(32)
+        expires = datetime.utcnow() + timedelta(hours=RESET_TOKEN_HOURS)
+        await cred_service.set_worker_reset_token(db, cred["account_id"], token, expires)
+        reset_link = f"{settings.FRONTEND_URL.rstrip('/')}/worker-reset-password?token={token}"
+
+        if smtp_configured():
+            email_sent = send_worker_password_reset_email(
+                to_email=email_norm,
+                name=doc.get("name") or "Worker",
+                reset_link=reset_link,
+            )
+            if not email_sent:
+                logger.warning(
+                    "Worker password reset email failed for %s; returning reset link in response.",
+                    email_norm,
+                )
+        else:
+            logger.warning(
+                "SMTP not configured for worker password reset; exposing reset link in API response for local testing."
+            )
+
+    response = {
+        "message": "If this email is registered as a worker, a password reset link has been sent.",
+    }
+    if reset_link and not smtp_configured():
+        response["reset_link"] = reset_link
+    return response
+
+
+@router.post("/reset-password")
+async def worker_reset_password(body: WorkerResetPassword):
+    """Reset worker password using token from email link."""
+    db = await get_database()
+    now = datetime.utcnow()
+    cred = await cred_service.find_worker_by_reset_token(db, body.token)
+    if not cred or cred.get("password_reset_expires", datetime.min) <= now:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link. Please request a new one.")
+
+    await cred_service.update_worker_password(db, cred["account_id"], _hash_password(body.new_password))
+    await cred_service.clear_worker_reset_token(db, cred["account_id"])
+    return {"message": "Password updated successfully. You can now sign in with your new password."}

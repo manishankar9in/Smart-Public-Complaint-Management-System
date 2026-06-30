@@ -29,6 +29,8 @@ app = FastAPI(
 origins = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
 ]
 
 app.add_middleware(
@@ -43,7 +45,7 @@ app.add_middleware(
     allow_private_network=True,
 )
 
-from routes import complaints, auth, feedback, admin, workers, worker_auth
+from routes import complaints, auth, feedback, admin, workers, worker_auth, notifications
 
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(worker_auth.router, prefix="/api/worker-auth", tags=["worker-auth"])
@@ -51,6 +53,7 @@ app.include_router(complaints.router, prefix="/api/complaints", tags=["complaint
 app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
 app.include_router(workers.router, prefix="/api/workers", tags=["workers"])
 app.include_router(feedback.router, prefix="/api/feedback", tags=["feedback"])
+app.include_router(notifications.router, prefix="/api/notifications", tags=["notifications"])
 
 
 @app.get("/api/health")

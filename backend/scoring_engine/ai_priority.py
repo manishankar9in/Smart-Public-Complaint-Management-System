@@ -1,5 +1,8 @@
 import re
 
+from services.category_mapping import category_scoring_key, category_to_duty
+
+
 def calculate_priority_score(category: str, description: str, history_data: dict = None) -> dict:
     """
     AI Priority Scoring Engine

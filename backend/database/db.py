@@ -37,6 +37,10 @@ class Database:
     def notifications(self):
         return self.db["notifications"]
 
+    @property
+    def login_credentials(self):
+        return self.db["login_credentials"]
+
 db_manager = Database()
 
 async def get_database():
@@ -44,13 +48,19 @@ async def get_database():
 
 async def connect_to_mongo():
     # Fail fast when MongoDB is not running (avoids very long hangs on first DB call)
-    db_manager.client = AsyncIOMotorClient(
-        settings.MONGODB_URI,
-        serverSelectionTimeoutMS=8000,
-        connectTimeoutMS=8000,
-        socketTimeoutMS=15000,
-    )
-    print(f"Connected to MongoDB: {db_manager.db_name}")
+    uri = settings.MONGODB_URI
+    kwargs = {
+        "serverSelectionTimeoutMS": 8000,
+        "connectTimeoutMS": 8000,
+        "socketTimeoutMS": 15000,
+    }
+    # Atlas (mongodb+srv) uses TLS automatically; local mongodb:// does not need it.
+    if uri.startswith("mongodb+srv://"):
+        kwargs["tls"] = True
+
+    db_manager.client = AsyncIOMotorClient(uri, **kwargs)
+    await db_manager.client.admin.command("ping")
+    print(f"Connected to MongoDB database: {db_manager.db_name}")
 
 async def close_mongo_connection():
     if db_manager.client:

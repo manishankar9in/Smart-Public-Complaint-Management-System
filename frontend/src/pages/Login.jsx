@@ -2,21 +2,25 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "react-toastify";
-import { Globe, Mail, Lock, Loader2, ArrowRight } from "lucide-react";
-import { Card } from "../components/UI";
-import { motion } from "framer-motion";
+import { Mail, Lock, Loader2, ArrowRight } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { LOGIN_ROLE_CONFIG } from "../data/roleThemes";
+
+const VALID_ROLES = ["public", "worker", "admin"];
 
 const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [mouse, setMouse] = useState({ x: 0, y: 0 });
   const { user, login, loginWithGoogle } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  
-  // Detect role from URL query
-  const queryParams = new URLSearchParams(location.search);
-  const targetRole = queryParams.get("role") || "public";
+
+  const urlRole = new URLSearchParams(location.search).get("role");
+  const targetRole = VALID_ROLES.includes(urlRole) ? urlRole : "public";
+  const config = LOGIN_ROLE_CONFIG[targetRole];
+  const theme = LOGIN_ROLE_CONFIG[targetRole];
 
   const getTargetDashboard = (role) => {
     if (role === "admin") return "/admin-dashboard";
@@ -24,157 +28,262 @@ const Login = () => {
     return "/user-dashboard";
   };
 
-  // Handle post-redirect or direct-session auto-routing
+  useEffect(() => {
+    localStorage.setItem("role", targetRole);
+  }, [targetRole]);
+
   useEffect(() => {
     if (user) {
-      // If backend sync hasn't attached `role` yet, use the role from the URL.
       const roleToUse = user.role || targetRole;
-      navigate(getTargetDashboard(roleToUse), { replace: true });
+      if (roleToUse === targetRole) {
+        navigate(getTargetDashboard(roleToUse), { replace: true });
+      }
     }
-  }, [user, navigate, targetRole]);
+  }, [user, targetRole, navigate]);
+
+  const switchRole = (role) => navigate(`/login?role=${role}`, { replace: true });
+
+  const handleMouseMove = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width - 0.5;
+    const y = (e.clientY - rect.top) / rect.height - 0.5;
+    setMouse({ x, y });
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      await login(email, password, targetRole);
-      toast.success(`Access Granted: ${targetRole.toUpperCase()} Dashboard`);
-      navigate(getTargetDashboard(targetRole));
+      localStorage.setItem("role", targetRole);
+      await login(email.trim(), password, targetRole);
+      toast.success(`Welcome to ${config.label} dashboard.`);
+      navigate(getTargetDashboard(targetRole), { replace: true });
     } catch (error) {
-      toast.error(error.message || "Credential Check Failed.");
+      toast.error(error.message || "Sign in failed.");
     } finally {
       setLoading(false);
     }
   };
 
   const handleGoogleLogin = async () => {
+    if (targetRole !== "public") return;
+    setLoading(true);
     try {
-      await loginWithGoogle(targetRole);
+      localStorage.setItem("role", "public");
+      const result = await loginWithGoogle("public");
+      if (result) {
+        toast.success("Signed in with Google.");
+        navigate("/user-dashboard", { replace: true });
+      }
     } catch (error) {
-      toast.error("Google Auth Denied");
+      toast.error(error?.message || "Google sign-in failed.");
+    } finally {
+      setLoading(false);
     }
   };
 
+  const PortalIcon = config.icon;
+  const tabIndex = VALID_ROLES.indexOf(targetRole);
+
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6 bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-blue-50 via-slate-50 to-white">
-      <div className="w-full max-w-md">
+    <div
+      className={`login-shell ${theme.shellClass}`}
+      onMouseMove={handleMouseMove}
+      aria-label={`${config.label} sign in`}
+    >
+      <div className="login-grid-overlay" aria-hidden />
+
+      {/* Animated background orbs — color changes per portal */}
+      <AnimatePresence mode="wait">
         <motion.div
-           initial={{ opacity: 0, y: 20 }}
-           animate={{ opacity: 1, y: 0 }}
-           className="text-center mb-8"
+          key={targetRole}
+          className="pointer-events-none absolute inset-0 overflow-hidden"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.6 }}
+          aria-hidden
         >
-          <div className="mb-6">
-            <Link
-              to="/"
-              className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-muted hover:text-primary transition-colors"
+          <div
+            className="login-orb login-orb-1 h-72 w-72 sm:h-96 sm:w-96"
+            style={{ top: "-8%", left: "-5%", background: theme.orbA, opacity: 0.5 }}
+          />
+          <div
+            className="login-orb login-orb-2 h-64 w-64 sm:h-80 sm:w-80"
+            style={{ bottom: "-10%", right: "-5%", background: theme.orbB, opacity: 0.45 }}
+          />
+          <div
+            className="login-orb login-orb-3 h-48 w-48 sm:h-56 sm:w-56"
+            style={{ top: "40%", right: "15%", background: theme.orbC, opacity: 0.35 }}
+          />
+        </motion.div>
+      </AnimatePresence>
+
+      <motion.div
+        className="login-card-3d"
+        style={{
+          rotateX: mouse.y * -6,
+          rotateY: mouse.x * 6,
+        }}
+        transition={{ type: "spring", stiffness: 180, damping: 22 }}
+      >
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-5 text-center">
+          <Link
+            to="/"
+            className="mb-4 inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-white/60 transition-colors hover:text-white sm:text-sm"
+          >
+            ← Back to Home
+          </Link>
+
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={targetRole}
+              initial={{ opacity: 0, scale: 0.85, rotateX: -12 }}
+              animate={{ opacity: 1, scale: 1, rotateX: 0 }}
+              exit={{ opacity: 0, scale: 0.9, rotateX: 12 }}
+              transition={{ duration: 0.35, ease: "easeOut" }}
             >
-              Back to Home
-            </Link>
-          </div>
-          <div className="w-16 h-16 bg-primary rounded-3xl flex items-center justify-center text-white font-black text-3xl shadow-xl shadow-blue-200 mx-auto mb-6">S</div>
-          <h1 className="text-3xl font-black text-secondary tracking-tight uppercase">Terminal Access</h1>
-          <p className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mt-2">Authority Level: {targetRole}</p>
+              <div className={`login-portal-icon ${theme.iconBg} shadow-lg`} style={{ boxShadow: `0 12px 40px ${theme.glow}` }}>
+                <PortalIcon size={28} className="text-white" aria-hidden />
+              </div>
+              <h1 className="text-xl font-black tracking-tight text-white sm:text-2xl">{config.title}</h1>
+              <p className="mt-1.5 text-xs text-white/65 sm:text-sm">{config.subtitle}</p>
+            </motion.div>
+          </AnimatePresence>
         </motion.div>
 
-        <motion.div
-           initial={{ opacity: 0, scale: 0.95 }}
-           animate={{ opacity: 1, scale: 1 }}
-           transition={{ delay: 0.1 }}
-        >
-          <Card className="!p-10 glass-card border-slate-100 shadow-premium">
-            <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="space-y-5">
-                <div className="group">
-                  <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-3 ml-1">Work Email</label>
+        {/* Portal tabs with sliding color indicator */}
+        <div className="login-tab-bar" role="tablist" aria-label="Login portal">
+          <motion.div
+            className={`login-tab-indicator login-tab-indicator-${targetRole}`}
+            layout
+            transition={{ type: "spring", stiffness: 380, damping: 32 }}
+            style={{
+              left: `calc(${tabIndex} * (100% / 3) + 4px)`,
+              width: "calc(33.333% - 8px)",
+            }}
+            aria-hidden
+          />
+          {VALID_ROLES.map((role) => {
+            const rc = LOGIN_ROLE_CONFIG[role];
+            const RIcon = rc.icon;
+            const active = targetRole === role;
+            return (
+              <button
+                key={role}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => switchRole(role)}
+                className={`login-tab-btn ${active ? `login-tab-active ${rc.tabActive}` : ""}`}
+              >
+                <RIcon size={17} aria-hidden />
+                <span className="text-[9px] font-bold uppercase tracking-wide sm:text-[10px]">{rc.tabLabel}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={targetRole}
+            initial={{ opacity: 0, y: 14, rotateX: 8 }}
+            animate={{ opacity: 1, y: 0, rotateX: 0 }}
+            exit={{ opacity: 0, y: -10, rotateX: -6 }}
+            transition={{ duration: 0.32 }}
+            style={{ transformStyle: "preserve-3d" }}
+          >
+            <div className="login-glass-panel">
+              <form onSubmit={handleSubmit} className="space-y-3.5">
+                <div>
+                  <label htmlFor="email" className="mb-1.5 ml-0.5 block text-[10px] font-bold uppercase tracking-widest text-white/70 sm:text-xs">
+                    Email Address
+                  </label>
                   <div className="relative">
-                    <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-muted/40 group-focus-within:text-primary transition-colors" size={18} />
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} aria-hidden />
                     <input
+                      id="email"
                       type="email"
                       required
+                      autoComplete="email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      className="input-field pl-12 h-14"
-                      placeholder="name@authority.in"
+                      className="login-input min-h-[42px]"
+                      placeholder="Enter your email"
                     />
                   </div>
                 </div>
 
-                <div className="group">
-                  <div className="flex justify-between items-center mb-3 ml-1">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-muted">Passphrase</label>
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <label htmlFor="password" className="ml-0.5 block text-[10px] font-bold uppercase tracking-widest text-white/70 sm:text-xs">
+                      Password
+                    </label>
+                    {config.showForgot && (
+                      <Link
+                        to={config.forgotLink || "/forgot-password"}
+                        className={`cursor-pointer text-[10px] font-bold hover:underline sm:text-xs ${theme.linkClass}`}
+                      >
+                        Forgot?
+                      </Link>
+                    )}
                   </div>
                   <div className="relative">
-                    <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-muted/40 group-focus-within:text-primary transition-colors" size={18} />
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} aria-hidden />
                     <input
+                      id="password"
                       type="password"
                       required
+                      autoComplete="current-password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="input-field pl-12 h-14"
-                      placeholder="••••••••"
+                      className="login-input min-h-[42px]"
+                      placeholder="Enter your password"
                     />
                   </div>
                 </div>
-              </div>
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full btn-primary flex items-center justify-center gap-3 py-6 shadow-xl"
-              >
-                {loading ? (
-                  <Loader2 className="animate-spin" size={18} />
-                ) : (
-                  <>
-                    Initialize Dashboard <ArrowRight size={18} />
-                  </>
-                )}
-              </button>
-            </form>
-
-            {targetRole !== "admin" && targetRole !== "worker" && (
-              <>
-                <div className="my-8 flex items-center gap-4">
-                  <div className="h-px bg-slate-100 flex-1"></div>
-                  <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest">or Authenticate With</span>
-                  <div className="h-px bg-slate-100 flex-1"></div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleGoogleLogin}
-                  className="w-full py-5 rounded-[24px] border-2 border-slate-100 flex items-center justify-center gap-4 text-[10px] font-black uppercase tracking-widest text-slate-700 hover:bg-slate-50 transition-all hover:border-slate-200"
-                >
-                  <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-soft border border-slate-100">
-                      <Globe size={20} className="text-blue-500" />
-                  </div>
-                  Google Identity Sync
+                <button type="submit" disabled={loading} className={`inline-flex items-center justify-center gap-2 ${theme.btnClass}`}>
+                  {loading ? <Loader2 className="animate-spin" size={16} /> : <>Sign In <ArrowRight size={16} /></>}
                 </button>
-              </>
-            )}
+              </form>
 
-            {targetRole === "worker" && (
-              <p className="mt-6 text-center text-[10px] text-muted font-medium">
-                Field workers use email and password registered in MongoDB (no Firebase / Google).
-              </p>
-            )}
+              {config.showGoogle && (
+                <>
+                  <div className="my-4 flex items-center gap-2">
+                    <div className="h-px flex-1 bg-white/10" />
+                    <span className="text-[10px] font-bold uppercase text-white/40">or</span>
+                    <div className="h-px flex-1 bg-white/10" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleGoogleLogin}
+                    disabled={loading}
+                    className="flex w-full cursor-pointer items-center justify-center gap-2.5 rounded-xl border border-white/15 bg-white/95 px-3 py-2.5 text-sm font-semibold text-slate-800 shadow-md transition-all duration-300 hover:-translate-y-0.5 hover:bg-white hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden>
+                      <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+                      <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+                      <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+                      <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+                    </svg>
+                    Sign in with Google
+                  </button>
+                </>
+              )}
 
-            <div className="mt-10 pt-8 border-t border-slate-100 text-center">
-              <p className="text-[10px] text-muted font-bold uppercase tracking-widest leading-loose">
-                Don't have an identity yet? <br/>
-                <Link to={`/register?role=${targetRole}`} className="text-primary hover:underline">Request Account Access</Link>
-              </p>
+              {config.showRegister && (
+                <p className="mt-4 border-t border-white/10 pt-4 text-center text-xs text-white/55">
+                  New here?{" "}
+                  <Link to={`/register?role=${targetRole}`} className={`cursor-pointer font-bold hover:underline ${theme.linkClass}`}>
+                    {config.registerLink}
+                  </Link>
+                </p>
+              )}
             </div>
-          </Card>
-        </motion.div>
-        
-        <div className="mt-8 text-center">
-           <div className="bg-white/50 inline-flex items-center gap-2 px-4 py-2 rounded-full border border-slate-100">
-              <div className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-[10px] font-black uppercase tracking-widest text-muted/60">System Online (Mainnet)</span>
-           </div>
-        </div>
-      </div>
+          </motion.div>
+        </AnimatePresence>
+      </motion.div>
     </div>
   );
 };

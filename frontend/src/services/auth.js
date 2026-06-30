@@ -1,4 +1,4 @@
-import { auth } from './firebase';
+import { auth } from "../config/firebase";
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
@@ -32,20 +32,33 @@ export const AuthService = {
     }
   },
 
-  login: async (email, password) => {
+  login: async (email, password, role = 'user') => {
     try {
+      // For workers, use MongoDB authentication instead of Firebase
+      if (role === 'worker') {
+        const res = await api.post('/worker_auth/login', {
+          email: email,
+          password: password
+        });
+        const userData = res.data;
+        
+        localStorage.setItem('auth_user', JSON.stringify(userData));
+        return { success: true, user: userData.worker };
+      }
+      
+      // For other users, use Firebase authentication
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
       // Get user profile from backend
-      const res = await api.get(`/auth/${user.uid}`);
-      const userData = res.data;
+      const profileRes = await api.get(`/auth/${user.uid}`);
+      const userData = profileRes.data;
       
       localStorage.setItem('auth_user', JSON.stringify(userData));
       return { success: true, user: userData };
     } catch (error) {
       console.error("Auth Login Error", error);
-      return { success: false, message: error.message };
+      return { success: false, message: error.response?.data?.detail || error.message };
     }
   },
 

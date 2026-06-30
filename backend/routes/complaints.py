@@ -4,6 +4,7 @@ from database.mongo_json import mongo_to_jsonable
 from models.complaint import ComplaintCreate, ComplaintResponse
 from datetime import datetime, timedelta
 from bson import ObjectId
+from services.notifications import create_notification
 
 router = APIRouter()
 
@@ -28,6 +29,23 @@ async def create_complaint(complaint: ComplaintCreate):
     sla_hours = await get_sla_hours(db)
     
     complaint_dict = complaint.dict()
+
+    # Duplicate complaint detection: same category within ~150m in the last 48h
+    duplicate_window_start = datetime.utcnow() - timedelta(hours=48)
+    approx_delta = 0.0015
+    duplicate = await db.complaints.find_one(
+        {
+            "category": complaint.category,
+            "created_at": {"$gte": duplicate_window_start},
+            "gps_lat": {"$gte": complaint.gps_lat - approx_delta, "$lte": complaint.gps_lat + approx_delta},
+            "gps_long": {"$gte": complaint.gps_long - approx_delta, "$lte": complaint.gps_long + approx_delta},
+        }
+    )
+    if duplicate:
+        raise HTTPException(
+            status_code=409,
+            detail="Similar complaint already exists nearby. Please track existing issue or provide additional details.",
+        )
     
     # AI Priority Scoring (Automated on Submission)
     priority = calculate_priority_score(complaint.category, complaint.description)
@@ -62,10 +80,17 @@ async def create_complaint(complaint: ComplaintCreate):
     complaint_dict["citizen_name"] = citizen.get("name", "Citizen")
     
     result = await db.complaints.insert_one(complaint_dict)
+    complaint_id = str(result.inserted_id)
+    await create_notification(
+        user_id=complaint.firebase_uid,
+        message=f"Complaint submitted for {complaint.category}. Status: Pending admin verification.",
+        event_type="COMPLAINT_SUBMITTED",
+        complaint_id=complaint_id,
+    )
     
     return {
         "message": "Complaint raised with GPS proof. Your issue has been received and is under processing.", 
-        "id": str(result.inserted_id),
+        "id": complaint_id,
         "priority": priority["level"]
     }
 

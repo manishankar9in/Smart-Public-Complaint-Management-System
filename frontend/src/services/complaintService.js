@@ -26,7 +26,7 @@ export async function fetchUserComplaints(uid) {
 }
 
 export async function fetchAdminComplaints() {
-  const res = await api.get("/admin/all");
+  const res = await api.get("/admin/processing");
   const list = asComplaintList(res.data);
-  return list;
+  return list.filter((c) => !["RESOLVED", "CLOSED"].includes(String(c.status || "").toUpperCase()));
 }

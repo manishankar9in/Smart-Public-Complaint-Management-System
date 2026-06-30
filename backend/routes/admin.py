@@ -6,6 +6,10 @@ from models.complaint import ComplaintVerifyUpdate, WorkerAssignment, AdminSolut
 from datetime import datetime, timedelta
 from scoring_engine.ai_priority import calculate_priority_score
 from services.worker_routing import find_best_worker
+from services.category_mapping import duty_matches_category
+from services.worker_routing import _location_matches
+from services.notifications import create_notification
+from services.worker_stats import increment_worker_solved, decrement_worker_solved
 
 router = APIRouter()
 
@@ -26,6 +30,17 @@ async def get_sla_hours(db):
 async def get_all_complaints():
     db = await get_database()
     cursor = db.complaints.find({})
+    complaints = await cursor.to_list(length=500)
+    return [mongo_to_jsonable(c) for c in complaints]
+
+
+@router.get("/processing")
+async def get_processing_complaints():
+    """Active complaints only — resolved/closed history excluded from admin queue."""
+    db = await get_database()
+    cursor = db.complaints.find({
+        "status": {"$nin": ["RESOLVED", "CLOSED"]}
+    }).sort("created_at", -1)
     complaints = await cursor.to_list(length=500)
     return [mongo_to_jsonable(c) for c in complaints]
 
@@ -73,18 +88,92 @@ async def verify_complaint(complaint_id: str, update: ComplaintVerifyUpdate):
     return {"message": "Complaint verified and scored.", "priority": priority["level"]}
 
 @router.put("/assign-worker/{complaint_id}")
-async def assign_worker(complaint_id: str, worker_uid: str = None):
+async def assign_worker(complaint_id: str, payload: dict = None):
+    """Assign a worker to a complaint (manual or auto-assignment)."""
     db = await get_database()
     
     complaint = await db.complaints.find_one({"_id": ObjectId(complaint_id)})
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
 
-    # Intelligent Auto-Routing if no UID provided
-    assigned_worker_uid = worker_uid or await find_best_worker(complaint)
+    # Get worker_uid from request body or use auto-assignment
+    worker_uid = None
+    if payload and "worker_uid" in payload:
+        worker_uid = payload["worker_uid"]
+    
+    # Priority-based Auto-Routing if no UID provided
+    if not worker_uid:
+        category = complaint.get("category", "Other")
+        state = complaint.get("state")
+        city = complaint.get("city")
+
+        all_workers = await db.workers.find({}).to_list(length=200)
+
+        def _norm(val):
+            return str(val or "").strip().lower()
+
+        candidates = []
+        for worker in all_workers:
+            duty = worker.get("duty_position") or "Other"
+            if not duty_matches_category(duty, category):
+                continue
+            if not _location_matches(worker, complaint):
+                continue
+            candidates.append(worker)
+
+        if not candidates:
+            raise HTTPException(
+                status_code=400,
+                detail="No worker found matching complaint category and location.",
+            )
+
+        worker_scores = []
+        for worker in candidates:
+            active_tasks = await db.complaints.count_documents({
+                "worker_uid": str(worker["_id"]),
+                "status": {"$in": ["ASSIGNED_TO_WORKER", "IN_PROGRESS", "REOPENED"]}
+            })
+
+            complaint_priority = complaint.get("priority_level", "Low")
+            if complaint_priority == "Critical":
+                priority_score = 100
+            elif complaint_priority == "High":
+                priority_score = 75
+            elif complaint_priority == "Medium":
+                priority_score = 50
+            else:
+                priority_score = 25
+
+            duty_bonus = 20 if duty_matches_category(worker.get("duty_position") or "Other", category) else 0
+            final_score = priority_score + duty_bonus - (active_tasks * 10)
+
+            worker_scores.append({
+                "worker": worker,
+                "score": final_score,
+                "active_tasks": active_tasks
+            })
+
+        if worker_scores:
+            worker_scores.sort(key=lambda x: x["score"], reverse=True)
+            assigned_worker_uid = str(worker_scores[0]["worker"]["_id"])
+        else:
+            assigned_worker_uid = None
+    else:
+        assigned_worker_uid = worker_uid
     
     if not assigned_worker_uid:
         raise HTTPException(status_code=400, detail="No available worker in this area.")
+
+    # Verify worker exists if manual assignment
+    if worker_uid:
+        worker = await db.workers.find_one({"worker_uid": worker_uid})
+        if not worker:
+            try:
+                worker = await db.workers.find_one({"_id": ObjectId(worker_uid)})
+            except Exception:
+                worker = None
+        if not worker:
+            raise HTTPException(status_code=404, detail="Worker not found")
 
     result = await db.complaints.update_one(
         {"_id": ObjectId(complaint_id)},
@@ -96,7 +185,32 @@ async def assign_worker(complaint_id: str, worker_uid: str = None):
         }}
     )
     
-    return {"message": f"Mission assigned to authority: {assigned_worker_uid}"}
+    citizen_uid = complaint.get("firebase_uid")
+    if citizen_uid:
+        await create_notification(
+            user_id=citizen_uid,
+            message="Your complaint has been assigned to a field worker.",
+            event_type="ASSIGNED_TO_WORKER",
+            complaint_id=complaint_id,
+        )
+    await create_notification(
+        user_id=assigned_worker_uid,
+        message=f"New complaint assigned: {complaint.get('category', 'General issue')}.",
+        event_type="WORKER_TASK_ASSIGNED",
+        complaint_id=complaint_id,
+    )
+    
+    worker_name = "Unknown"
+    if worker_uid:
+        worker = await db.workers.find_one({"worker_uid": worker_uid})
+        worker_name = worker.get("name", "Unknown") if worker else "Unknown"
+    
+    return {
+        "message": "Worker assigned successfully",
+        "complaint_id": complaint_id,
+        "worker_uid": assigned_worker_uid,
+        "worker_name": worker_name
+    }
 
 @router.put("/verify-solution/{complaint_id}")
 async def verify_solution(
@@ -110,7 +224,11 @@ async def verify_solution(
 
     admin_note = update.admin_note
     admin_response_message = update.admin_response_message or admin_note
-    admin_response_image_url = update.admin_response_image_url
+    admin_response_image_url = update.admin_response_image_url or None
+
+    complaint = await db.complaints.find_one({"_id": ObjectId(complaint_id)})
+    prior_status = complaint.get("status") if complaint else None
+    worker_uid = str(complaint.get("worker_uid")) if complaint and complaint.get("worker_uid") else None
     
     await db.complaints.update_one(
         {"_id": ObjectId(complaint_id)},
@@ -120,13 +238,36 @@ async def verify_solution(
             # Keep backward-compat fields used by existing UI
             "admin_final_note": admin_note,
             "closed_at": datetime.utcnow() if approve else None,
-            # New fields for citizen response
-            "admin_response_message": admin_response_message if approve else None,
-            "admin_response_image_url": admin_response_image_url if approve else None,
-            # New fields for rejection note shown to worker
+            # Citizen-facing response stored for both approved and reopened paths
+            "admin_response_message": admin_response_message,
+            "admin_response_image_url": admin_response_image_url,
+            # Reopen note shown to worker
             "admin_rejection_reason": admin_note if not approve else None,
         }}
     )
+    complaint = await db.complaints.find_one({"_id": ObjectId(complaint_id)})
+    citizen_uid = complaint.get("firebase_uid") if complaint else None
+
+    if worker_uid:
+        if approve and prior_status != "RESOLVED":
+            await increment_worker_solved(db, worker_uid)
+        elif not approve and prior_status == "RESOLVED":
+            await decrement_worker_solved(db, worker_uid)
+
+    if citizen_uid:
+        await create_notification(
+            user_id=citizen_uid,
+            message="Admin has verified your complaint resolution." if approve else "Admin has reopened your complaint for further action.",
+            event_type="ADMIN_VERIFIED" if approve else "COMPLAINT_REOPENED",
+            complaint_id=complaint_id,
+        )
+    if complaint and complaint.get("worker_uid"):
+        await create_notification(
+            user_id=str(complaint.get("worker_uid")),
+            message="Your submitted work has been verified." if approve else "Your submitted work was rejected and needs rework.",
+            event_type="WORK_VERIFIED" if approve else "WORK_REJECTED",
+            complaint_id=complaint_id,
+        )
     
     return {"message": f"Integrity check complete. Status: {status}"}
 
@@ -202,6 +343,25 @@ async def assign_worker_to_department(payload: dict):
     return {"message": "Worker assigned to department"}
 
 
+@router.get("/workers")
+async def get_all_workers():
+    """Get all workers with their current workload and solved count for admin assignment."""
+    db = await get_database()
+    cursor = db.workers.find({})
+    workers = await cursor.to_list(length=200)
+    
+    for worker in workers:
+        worker_uid = str(worker.get("_id"))
+        active_tasks = await db.complaints.count_documents({
+            "worker_uid": worker_uid,
+            "status": {"$in": ["ASSIGNED_TO_WORKER", "IN_PROGRESS", "REOPENED"]}
+        })
+        worker["active_tasks"] = active_tasks
+        worker["solved_count"] = worker.get("complaints_solved", 0)
+        worker["worker_uid"] = worker_uid
+    
+    return [mongo_to_jsonable(w) for w in workers]
+
 @router.get("/workers-list")
 async def list_field_workers():
     """Workers stored in MongoDB (JWT auth — not Firebase)."""
@@ -221,6 +381,7 @@ async def list_field_workers():
                 "ward": w.get("ward"),
                 "village": w.get("village"),
                 "department": w.get("department"),
+                "complaints_solved": w.get("complaints_solved", 0),
             }
         )
     return out
@@ -297,3 +458,58 @@ async def run_sla_escalation():
         escalated_ids.append(str(complaint_id))
 
     return {"message": "SLA escalation check complete", "escalated_count": len(escalated_ids), "complaint_ids": escalated_ids}
+
+
+@router.get("/feedback")
+async def get_all_feedback():
+    """Citizen feedback entries for admin review."""
+    db = await get_database()
+    cursor = db.feedback.find({"admin_reviewed": {"$ne": True}}).sort("timestamp", -1)
+    items = await cursor.to_list(length=500)
+    enriched = []
+    for item in items:
+        doc = mongo_to_jsonable(item)
+        cid = item.get("complaint_id")
+        if cid:
+            try:
+                complaint = await db.complaints.find_one({"_id": ObjectId(cid)})
+                if complaint:
+                    doc["complaint_status"] = complaint.get("status")
+                    doc["complaint_category"] = doc.get("complaint_category") or complaint.get("category")
+                    doc["complaint_city"] = doc.get("complaint_city") or complaint.get("city")
+                    doc["complaint_state"] = doc.get("complaint_state") or complaint.get("state")
+            except Exception:
+                pass
+        if item.get("worker_uid"):
+            try:
+                worker = await db.workers.find_one({"_id": ObjectId(item["worker_uid"])})
+                if worker:
+                    doc["worker_name"] = worker.get("name")
+            except Exception:
+                pass
+        enriched.append(doc)
+    return enriched
+
+
+@router.put("/feedback/{feedback_id}/review")
+async def mark_feedback_reviewed(feedback_id: str, payload: dict = None):
+    """Admin marks feedback as reviewed."""
+    db = await get_database()
+    try:
+        oid = ObjectId(feedback_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid feedback id")
+    note = (payload or {}).get("admin_note", "")
+    result = await db.feedback.update_one(
+        {"_id": oid},
+        {"$set": {
+            "admin_reviewed": True,
+            "admin_review_note": note,
+            "admin_reviewed_at": datetime.utcnow(),
+        }},
+    )
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    return {"message": "Feedback marked as reviewed."}
+
+

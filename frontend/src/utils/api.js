@@ -16,6 +16,34 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+// Add request interceptor to include auth token
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('smartgov_worker_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Add response interceptor to handle 401 errors
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Clear token and redirect to login
+      localStorage.removeItem('smartgov_worker_token');
+      localStorage.removeItem('auth_user');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
 export function formatApiError(err) {
   if (err?.code === "ECONNABORTED" || err?.message?.includes("timeout")) {
     return "Request timed out. Start the backend (uvicorn), ensure MongoDB is running, and check VITE_BACKEND_URL.";

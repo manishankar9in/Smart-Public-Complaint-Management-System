@@ -20,7 +20,7 @@ export default {
         govstrip: '#0c4a6e',
       },
       fontFamily: {
-        sans: ['"Source Sans 3"', 'system-ui', 'sans-serif'],
+        sans: ['"Source Sans Pro"', 'Arial', 'Helvetica', 'system-ui', 'sans-serif'],
       },
       borderRadius: {
         '2xl': '1rem',

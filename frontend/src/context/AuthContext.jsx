@@ -6,8 +6,9 @@ import {
   signOut,
   sendPasswordResetEmail,
   GoogleAuthProvider,
-  signInWithRedirect,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
 } from "firebase/auth";
 import { auth } from "../config/firebase";
 import { toast } from "react-toastify";
@@ -17,6 +18,51 @@ const AuthContext = createContext();
 
 const WORKER_TOKEN_KEY = "smartgov_worker_token";
 const ROLE_STORAGE_KEY = "role";
+
+function mapApiError(error) {
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) return detail.map((d) => d.msg || String(d)).join(", ");
+  return error?.message || "Request failed.";
+}
+
+function mapFirebaseError(error) {
+  const code = error?.code || "";
+  if (code === "auth/invalid-credential" || code === "auth/wrong-password" || code === "auth/user-not-found") {
+    return "Invalid email or password. Please check your credentials.";
+  }
+  if (code === "auth/invalid-email") {
+    return "Please enter a valid email address.";
+  }
+  if (code === "auth/user-disabled") {
+    return "This account is disabled in Firebase Authentication.";
+  }
+  if (code === "auth/too-many-requests") {
+    return "Too many failed attempts. Please wait a moment and try again.";
+  }
+  if (code === "auth/operation-not-allowed") {
+    return "Email/password sign-in is disabled in Firebase Console. Enable it in Authentication > Sign-in method.";
+  }
+  if (code === "auth/network-request-failed") {
+    return "Network error while contacting Firebase. Check your internet connection.";
+  }
+  if (code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request") {
+    return "Google sign-in was cancelled.";
+  }
+  if (code === "auth/popup-blocked") {
+    return "Popup blocked. Allow popups for this site and try again.";
+  }
+  if (code === "auth/unauthorized-domain") {
+    return "This domain is not authorized in Firebase Console (Authentication > Settings > Authorized domains). Add localhost.";
+  }
+  if (code === "auth/api-key-not-valid.-please-pass-a-valid-api-key.") {
+    return "Firebase API key is invalid. Check VITE_FIREBASE_API_KEY in frontend/.env.local.";
+  }
+  if (code === "auth/argument-error") {
+    return "Google sign-in configuration error. Restart the dev server and ensure Google is enabled in Firebase Console.";
+  }
+  return error?.message || "Authentication failed.";
+}
 
 function normalizeWorkerUser(workerPayload) {
   const w = workerPayload?.worker || workerPayload;
@@ -35,6 +81,7 @@ function normalizeWorkerUser(workerPayload) {
     village: w.village,
     phone: w.phone,
     department: w.department,
+    complaints_solved: w.complaints_solved ?? 0,
     authSource: "worker",
   };
 }
@@ -56,8 +103,7 @@ export const AuthProvider = ({ children }) => {
 
   const applyAxiosWorkerAuth = (tokenOrNull) => {
     if (tokenOrNull) {
-      const h = `Bearer ${tokenOrNull}`;
-      api.defaults.headers.common.Authorization = h;
+      api.defaults.headers.common.Authorization = `Bearer ${tokenOrNull}`;
     } else {
       delete api.defaults.headers.common.Authorization;
     }
@@ -89,6 +135,15 @@ export const AuthProvider = ({ children }) => {
       return { ...firebaseUser, ...fetched, role: r, authSource: "firebase" };
     } catch (syncErr) {
       console.error("Backend sync failed:", syncErr?.response?.data || syncErr.message);
+      if (syncErr?.response && (syncErr.response.status === 403 || syncErr.response.status === 400)) {
+        try {
+          await signOut(auth);
+        } catch (signOutErr) {
+          console.error("SignOut during sync error failed:", signOutErr);
+        }
+        const backendMsg = syncErr.response.data?.detail || "Access denied by server validation.";
+        throw new Error(backendMsg);
+      }
       localStorage.setItem(ROLE_STORAGE_KEY, resolvedRole);
       return { ...firebaseUser, role: resolvedRole, authSource: "firebase" };
     }
@@ -98,7 +153,7 @@ export const AuthProvider = ({ children }) => {
     let mounted = true;
     let unsubscribeFirebase = () => {};
 
-    (async () => {
+    const bootstrap = async () => {
       const token = localStorage.getItem(WORKER_TOKEN_KEY);
       if (token) {
         try {
@@ -118,6 +173,35 @@ export const AuthProvider = ({ children }) => {
         }
       }
 
+      try {
+        await auth.authStateReady();
+      } catch (err) {
+        console.error("Firebase authStateReady failed:", err);
+        if (mounted) setLoading(false);
+        return;
+      }
+
+      try {
+        const redirectResult = await getRedirectResult(auth);
+        if (redirectResult?.user && mounted) {
+          const savedRole =
+            localStorage.getItem(ROLE_STORAGE_KEY) ||
+            localStorage.getItem("smartgov_target_role") ||
+            "public";
+          const syncedUser = await syncFirebaseUser(redirectResult.user, savedRole);
+          if (mounted) {
+            setUser(syncedUser);
+            persistRole(syncedUser.role || savedRole);
+            setLoading(false);
+          }
+          return;
+        }
+      } catch (redirectErr) {
+        console.error("Google redirect sign-in failed:", redirectErr);
+      }
+
+      if (!mounted) return;
+
       unsubscribeFirebase = onAuthStateChanged(auth, async (firebaseUser) => {
         if (!mounted) return;
         try {
@@ -130,20 +214,21 @@ export const AuthProvider = ({ children }) => {
               persistRole(syncedUser.role || savedRole);
             }
           } else if (mounted) {
-            setUser(null);
-            persistRole(null);
+            if (!localStorage.getItem(WORKER_TOKEN_KEY)) {
+              setUser(null);
+              persistRole(null);
+            }
           }
         } catch (err) {
           console.error("Auth state change error:", err);
-          if (mounted) {
-            setUser(null);
-            persistRole(null);
-          }
+          if (mounted && !localStorage.getItem(WORKER_TOKEN_KEY)) setUser(null);
         } finally {
           if (mounted) setLoading(false);
         }
       });
-    })();
+    };
+
+    bootstrap();
 
     return () => {
       mounted = false;
@@ -161,50 +246,89 @@ export const AuthProvider = ({ children }) => {
   }, [user]);
 
   const loginWorker = async (email, password) => {
-    const res = await api.post("/worker-auth/login", { email, password });
-    const token = res.data.access_token;
-    localStorage.setItem(WORKER_TOKEN_KEY, token);
-    applyAxiosWorkerAuth(token);
     try {
-      await signOut(auth);
-    } catch {
-      /* ignore */
+      const res = await api.post("/worker-auth/login", { email, password });
+      const token = res.data.access_token;
+      if (!token) {
+        throw new Error("No token received from worker login");
+      }
+      
+      localStorage.setItem(WORKER_TOKEN_KEY, token);
+      localStorage.setItem(ROLE_STORAGE_KEY, "worker");
+      applyAxiosWorkerAuth(token);
+      
+      try {
+        await signOut(auth);
+      } catch {
+        /* ignore Firebase logout errors */
+      }
+      
+      const normalized = normalizeWorkerUser(res.data);
+      if (normalized) {
+        setUser(normalized);
+        persistRole(normalized.role);
+      }
+      return res.data;
+    } catch (error) {
+      localStorage.removeItem(WORKER_TOKEN_KEY);
+      applyAxiosWorkerAuth(null);
+      throw new Error(mapApiError(error));
     }
-    const normalized = normalizeWorkerUser(res.data);
-    setUser(normalized);
-    persistRole(normalized.role);
-    return res.data;
   };
 
   const registerWorker = async (payload) => {
-    const res = await api.post("/worker-auth/register", payload);
-    const token = res.data.access_token;
-    localStorage.setItem(WORKER_TOKEN_KEY, token);
-    applyAxiosWorkerAuth(token);
     try {
-      await signOut(auth);
-    } catch {
-      /* ignore */
+      const res = await api.post("/worker-auth/register", payload);
+      const token = res.data.access_token;
+      if (!token) {
+        throw new Error("No token received from worker registration");
+      }
+      
+      localStorage.setItem(WORKER_TOKEN_KEY, token);
+      localStorage.setItem(ROLE_STORAGE_KEY, "worker");
+      applyAxiosWorkerAuth(token);
+      
+      try {
+        await signOut(auth);
+      } catch {
+        /* ignore Firebase logout errors */
+      }
+      
+      const normalized = normalizeWorkerUser(res.data);
+      if (normalized) {
+        setUser(normalized);
+        persistRole(normalized.role);
+      }
+      return res.data;
+    } catch (error) {
+      localStorage.removeItem(WORKER_TOKEN_KEY);
+      applyAxiosWorkerAuth(null);
+      throw new Error(mapApiError(error));
     }
-    const normalized = normalizeWorkerUser(res.data);
-    setUser(normalized);
-    persistRole(normalized.role);
-    return res.data;
   };
 
   const login = async (email, password, role = "public") => {
-    if (role === "worker") {
-      return loginWorker(email, password);
+    try {
+      if (role === "worker") {
+        return await loginWorker(email, password);
+      }
+      localStorage.removeItem(WORKER_TOKEN_KEY);
+      applyAxiosWorkerAuth(null);
+      localStorage.setItem("smartgov_target_role", role);
+      localStorage.setItem(ROLE_STORAGE_KEY, role);
+      
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const syncedUser = await syncFirebaseUser(userCredential.user, role);
+      if (syncedUser) {
+        setUser(syncedUser);
+        persistRole(syncedUser.role || role);
+      }
+      return userCredential;
+    } catch (error) {
+      localStorage.removeItem("smartgov_target_role");
+      if (role !== "worker") localStorage.removeItem(ROLE_STORAGE_KEY);
+      throw new Error(role === "worker" ? mapApiError(error) : mapFirebaseError(error));
     }
-    localStorage.removeItem(WORKER_TOKEN_KEY);
-    applyAxiosWorkerAuth(null);
-    localStorage.setItem("smartgov_target_role", role);
-    localStorage.setItem(ROLE_STORAGE_KEY, role);
-    const userCredential = await signInWithEmailAndPassword(auth, email, password);
-    const syncedUser = await syncFirebaseUser(userCredential.user, role);
-    setUser(syncedUser);
-    persistRole(syncedUser.role);
-    return userCredential;
   };
 
   const loginWithGoogle = async (role = "public") => {
@@ -218,25 +342,36 @@ export const AuthProvider = ({ children }) => {
     }
 
     const provider = new GoogleAuthProvider();
+    provider.addScope("email");
+    provider.addScope("profile");
+    provider.setCustomParameters({ prompt: "select_account" });
     localStorage.setItem("smartgov_target_role", role);
     localStorage.setItem(ROLE_STORAGE_KEY, role);
 
     try {
-      const result = await signInWithPopup(auth, provider);
+      let result;
+      try {
+        result = await signInWithPopup(auth, provider);
+      } catch (popupErr) {
+        const code = popupErr?.code || "";
+        if (
+          code === "auth/popup-blocked" ||
+          code === "auth/operation-not-supported-in-this-environment"
+        ) {
+          await signInWithRedirect(auth, provider);
+          return null;
+        }
+        throw popupErr;
+      }
       const syncedUser = await syncFirebaseUser(result.user, role);
-      setUser(syncedUser);
-      persistRole(syncedUser.role);
+      if (syncedUser) {
+        setUser(syncedUser);
+        persistRole(syncedUser.role || role);
+      }
       return result;
     } catch (error) {
-      if (
-        error?.code === "auth/popup-blocked" ||
-        error?.code === "auth/popup-closed-by-user" ||
-        error?.code === "auth/cancelled-popup-request"
-      ) {
-        return signInWithRedirect(auth, provider);
-      }
-      toast.error(error?.message || "Google Auth Denied");
-      throw error;
+      localStorage.removeItem("smartgov_target_role");
+      throw new Error(mapFirebaseError(error));
     }
   };
 
@@ -247,16 +382,22 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem(WORKER_TOKEN_KEY);
     applyAxiosWorkerAuth(null);
     const regRole = role || "public";
+    const displayName = (name && name.trim()) || email.split("@")[0] || "User";
     localStorage.setItem("smartgov_target_role", regRole);
     localStorage.setItem(ROLE_STORAGE_KEY, regRole);
-    const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-    const firebaseUser = userCredential.user;
+    let firebaseUser;
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      firebaseUser = userCredential.user;
+    } catch (error) {
+      throw new Error(mapFirebaseError(error));
+    }
 
     const { data: profile } = await api.post("/auth/sync", {
       firebase_uid: firebaseUser.uid,
       email,
-      name,
-      role,
+      name: displayName,
+      role: regRole,
       ...locationData,
     });
 
@@ -269,12 +410,13 @@ export const AuthProvider = ({ children }) => {
       persistRole(regRole);
     }
 
-    return userCredential;
+    return firebaseUser;
   };
 
   const logout = async () => {
     localStorage.removeItem("smartgov_target_role");
     localStorage.removeItem(WORKER_TOKEN_KEY);
+    localStorage.removeItem("auth_user");
     applyAxiosWorkerAuth(null);
     try {
       await signOut(auth);
@@ -285,8 +427,13 @@ export const AuthProvider = ({ children }) => {
     persistRole(null);
   };
 
-  const resetPassword = (email) => {
-    return sendPasswordResetEmail(auth, email);
+  const resetPassword = async (email) => {
+    const normalizedEmail = email.trim();
+    try {
+      await sendPasswordResetEmail(auth, normalizedEmail);
+    } catch (error) {
+      throw new Error(mapFirebaseError(error));
+    }
   };
 
   const value = {

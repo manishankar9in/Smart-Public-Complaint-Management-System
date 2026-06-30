@@ -108,3 +108,32 @@ export const sendNotification = async (type, params) => {
     throw error;
   }
 };
+
+/**
+ * Send worker password reset link using EmailJS
+ * @param {string} email 
+ * @param {string} resetLink 
+ */
+export const sendWorkerResetEmail = async (email, resetLink) => {
+  if (!SERVICE_ID || !PUBLIC_KEY || !TEMPLATE_DEFAULT) {
+    console.warn("EmailJS not fully configured");
+    throw new Error("EmailJS service credentials missing in environment config.");
+  }
+  const templateParams = {
+    to_email: email,
+    email_to: email,
+    subject: "SmartGov Worker — Password Reset Request",
+    message: `Hello Worker,
+
+We received a request to reset your worker portal password. Click the link below to set a new password:
+
+${resetLink}
+
+This link is valid for 1 hour. If you did not request this, you can safely ignore this email.
+
+— SmartGov Team`,
+    time: new Date().toLocaleString(),
+  };
+  return await emailjs.send(SERVICE_ID, TEMPLATE_DEFAULT, templateParams, PUBLIC_KEY);
+};
+

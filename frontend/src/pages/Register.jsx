@@ -1,45 +1,54 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "react-toastify";
-import { User, Mail, Lock, Loader2, ArrowRight, MapPin, Briefcase } from "lucide-react";
-import { Card } from "../components/UI";
-import { motion } from "framer-motion";
-import { INDIAN_STATES, getCitiesForState } from "../data/indiaLocations";
+import { Mail, Lock, Loader2, ArrowRight, MapPin, Phone } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { WORKER_DUTY_POSITIONS } from "../data/dutyPositions";
-import { formatApiError } from "../utils/api";
+import { api, formatApiError } from "../utils/api";
+import { PORTAL_THEMES } from "../data/roleThemes";
+import { INDIAN_STATES_WITH_DISTRICTS, getDistrictsForState, getAllStates } from "../data/indianStatesDistricts";
 
-const defaultRegState = "Andhra Pradesh";
+const ROLE_CONFIG = {
+  public: {
+    ...PORTAL_THEMES.public,
+    title: "Public User Registration",
+    subtitle: "Email, phone, password & address",
+  },
+  worker: {
+    ...PORTAL_THEMES.worker,
+    title: "Worker Registration",
+    subtitle: "Email, phone, password, area & category",
+  },
+};
 
 const Register = () => {
   const location = useLocation();
-  const queryParams = new URLSearchParams(location.search);
-  const targetRole = queryParams.get("role") || "public";
-  
-  const getTargetDashboard = (role) => {
-    if (role === "admin") return "/admin-dashboard";
-    if (role === "worker") return "/worker-dashboard";
-    return "/user-dashboard";
-  };
+  const navigate = useNavigate();
+  const urlRole = new URLSearchParams(location.search).get("role");
+  const targetRole = urlRole === "worker" ? "worker" : "public";
+  const config = ROLE_CONFIG[targetRole];
+  const isWorker = targetRole === "worker";
 
   const [formData, setFormData] = useState({
-    name: "",
     email: "",
     phone: "",
-    address: "",
     password: "",
-    confirmPassword: "",
-    role: targetRole === "worker" ? "worker" : targetRole === "public" ? "public" : "public",
-    state: defaultRegState,
-    city: getCitiesForState(defaultRegState)[0] || "",
-    ward: "",
-    duty_position: WORKER_DUTY_POSITIONS[1],
-    street: "",
-    village: "",
+    address: "",
+    state: "",
+    city: "",
+    duty_position: WORKER_DUTY_POSITIONS[0],
   });
+  const [customRole, setCustomRole] = useState("");
   const [loading, setLoading] = useState(false);
-  const { register, registerWorker } = useAuth();
-  const navigate = useNavigate();
+  const { register } = useAuth();
+
+  useEffect(() => {
+    if (urlRole === "admin") {
+      toast.info("Admin accounts cannot be self-registered.");
+      navigate("/login?role=admin", { replace: true });
+    }
+  }, [urlRole, navigate]);
 
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -47,42 +56,42 @@ const Register = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (formData.password !== formData.confirmPassword) {
-      return toast.error("Passwords do not match.");
+    if (formData.password.length < 6) {
+      return toast.error("Password must be at least 6 characters.");
     }
+
+    const finalDutyPosition = formData.duty_position === "Other" ? customRole.trim() : formData.duty_position;
+    if (isWorker && formData.duty_position === "Other" && !customRole.trim()) {
+      return toast.error("Please specify your custom category/role.");
+    }
+    if (isWorker && (!formData.state || !formData.city || !formData.address.trim())) {
+      return toast.error("State, District, and Area/Location are required for workers.");
+    }
+
     setLoading(true);
     try {
-      if (formData.role === "worker") {
-        await registerWorker({
+      if (isWorker) {
+        const name = formData.email.split("@")[0] || "Worker";
+        await api.post("/worker-auth/register", {
           email: formData.email,
           password: formData.password,
-          name: formData.name,
-          duty_position: formData.duty_position,
+          name,
+          phone: formData.phone,
+          duty_position: finalDutyPosition,
           state: formData.state,
           city: formData.city,
-          ward: formData.ward || undefined,
-          street: formData.street || undefined,
-          village: formData.village || undefined,
-          phone: formData.phone || undefined,
+          ward: formData.address.trim(),
         });
-        toast.success("Worker account created. You can now take assigned missions.");
-        navigate("/worker-dashboard");
+        toast.success("Worker registered! Sign in with your email and password.");
+        navigate("/login?role=worker", { replace: true });
       } else {
-        await register(
-          formData.email,
-          formData.password,
-          formData.name,
-          formData.role,
-          {
-            phone: formData.phone,
-            address: formData.address,
-            state: formData.state,
-            city: formData.city,
-            ward: formData.ward,
-          }
-        );
-        toast.success("Account created successfully! Welcome to the platform.");
-        navigate(getTargetDashboard(targetRole));
+        const name = formData.email.split("@")[0] || "Citizen";
+        await register(formData.email, formData.password, name, "public", {
+          phone: formData.phone,
+          address: formData.address,
+        });
+        toast.success("Account created! Welcome to the platform.");
+        navigate("/user-dashboard");
       }
     } catch (error) {
       toast.error(formatApiError(error));
@@ -91,288 +100,249 @@ const Register = () => {
     }
   };
 
+  const PortalIcon = config.icon;
+
+  const fields = isWorker
+    ? [
+        { id: "email", label: "Email Address *", type: "email", icon: Mail, name: "email", placeholder: "you@email.com" },
+        { id: "phone", label: "Phone Number *", type: "tel", icon: Phone, name: "phone", placeholder: "9876543210" },
+        { id: "password", label: "Password *", type: "password", icon: Lock, name: "password", placeholder: "Min. 6 characters" },
+        { id: "address", label: "Area / Location *", type: "text", icon: MapPin, name: "address", placeholder: "Ward, city or work area" },
+      ]
+    : [
+        { id: "email", label: "Email Address *", type: "email", icon: Mail, name: "email", placeholder: "you@email.com" },
+        { id: "phone", label: "Phone Number *", type: "tel", icon: Phone, name: "phone", placeholder: "9876543210" },
+        { id: "password", label: "Password *", type: "password", icon: Lock, name: "password", placeholder: "Min. 6 characters" },
+        { id: "address", label: "Address *", type: "text", icon: MapPin, name: "address", placeholder: "House no, street, city" },
+      ];
+
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-6">
-      <div className="w-full max-w-xl">
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="text-center mb-8"
-        >
-          <div className="mb-6">
-            <Link
-              to={`/login?role=${targetRole}`}
-              className="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-muted hover:text-primary transition-colors"
+    <div className={`login-shell ${config.shellClass}`}>
+      <div className="login-grid-overlay" aria-hidden />
+      <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden>
+        <div className="login-orb login-orb-1 h-72 w-72" style={{ top: "-8%", left: "-5%", background: config.orbA, opacity: 0.5 }} />
+        <div className="login-orb login-orb-2 h-64 w-64" style={{ bottom: "-10%", right: "-5%", background: config.orbB, opacity: 0.45 }} />
+      </div>
+
+      <motion.div className="login-card-3d" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
+        <div className="mb-5 text-center">
+          <Link
+            to={`/login?role=${targetRole}`}
+            className="mb-4 inline-flex cursor-pointer text-xs font-semibold text-white/60 transition-colors hover:text-white sm:text-sm"
+          >
+            ← Back to {isWorker ? "Worker" : "User"} Login
+          </Link>
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={targetRole}
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.3 }}
             >
-              Back to Login
-            </Link>
-          </div>
-          <div className="w-16 h-16 bg-primary rounded-lg flex items-center justify-center text-white font-bold text-2xl border border-slate-700/20 mx-auto mb-6">भा</div>
-          <h1 className="text-3xl font-bold text-secondary tracking-tight">Citizen registration</h1>
-          <p className="text-sm text-muted font-medium mt-2">Official portal — select your role and jurisdiction</p>
-        </motion.div>
+              <div className={`login-portal-icon ${config.iconBg}`} style={{ boxShadow: `0 12px 40px ${config.glow}` }}>
+                <PortalIcon size={28} className="text-white" aria-hidden />
+              </div>
+              <h1 className="text-xl font-black text-white sm:text-2xl">{config.title}</h1>
+              <p className="mt-1.5 text-xs text-white/65 sm:text-sm">{config.subtitle}</p>
+            </motion.div>
+          </AnimatePresence>
+        </div>
 
-        <motion.div
-          initial={{ opacity: 0, scale: 0.95 }}
-          animate={{ opacity: 1, scale: 1 }}
-          transition={{ delay: 0.1 }}
-        >
-          <Card className="!p-10 glass-card">
-            <form onSubmit={handleSubmit} className="space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {/* Personal Info */}
-                <div className="space-y-6">
-                  <div className="group">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-2 ml-1">Full Name</label>
-                    <div className="relative">
-                      <User className="absolute left-4 top-1/2 -translate-y-1/2 text-muted/40 group-focus-within:text-primary transition-colors" size={18} />
-                      <input
-                        name="name"
-                        type="text"
-                        required
-                        value={formData.name}
-                        onChange={handleChange}
-                        className="input-field pl-12"
-                        placeholder="enter name"
-                      />
-                    </div>
-                  </div>
+        <div className="login-tab-bar cols-2 mb-4">
+          {["public", "worker"].map((role, idx) => {
+            const rc = ROLE_CONFIG[role];
+            const RIcon = rc.icon;
+            const active = targetRole === role;
+            return (
+              <Link
+                key={role}
+                to={`/register?role=${role}`}
+                className={`login-tab-btn col-span-1 ${active ? `login-tab-active ${rc.tabActive}` : ""}`}
+                style={{ gridColumn: idx + 1 }}
+              >
+                <RIcon size={17} aria-hidden />
+                <span className="text-[9px] font-bold uppercase sm:text-[10px]">{rc.tabLabel}</span>
+              </Link>
+            );
+          })}
+          <motion.div
+            className={`login-tab-indicator login-tab-indicator-${targetRole}`}
+            layout
+            transition={{ type: "spring", stiffness: 380, damping: 32 }}
+            style={{
+              left: targetRole === "public" ? "4px" : "calc(50% + 2px)",
+              width: "calc(50% - 8px)",
+            }}
+            aria-hidden
+          />
+        </div>
 
-                  <div className="group">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-2 ml-1">Email Address</label>
-                    <div className="relative">
-                      <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-muted/40 group-focus-within:text-primary transition-colors" size={18} />
-                      <input
-                        name="email"
-                        type="email"
-                        required
-                        value={formData.email}
-                        onChange={handleChange}
-                        className="input-field pl-12"
-                        placeholder="enter email"
-                      />
-                    </div>
-                  </div>
+        <div className="login-glass-panel">
+          <form onSubmit={handleSubmit} className="space-y-3.5">
+            {fields.filter(f => f.name !== "address").map((f) => (
+              <div key={f.id}>
+                <label htmlFor={f.id} className="mb-1.5 ml-0.5 block text-[10px] font-bold uppercase tracking-widest text-white/70 sm:text-xs">
+                  {f.label}
+                </label>
+                <div className="relative">
+                  <f.icon className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} aria-hidden />
+                  <input
+                    id={f.id}
+                    name={f.name}
+                    type={f.type}
+                    required
+                    minLength={f.name === "password" ? 6 : undefined}
+                    autoComplete={f.name === "password" ? "new-password" : f.name}
+                    value={formData[f.name]}
+                    onChange={handleChange}
+                    className="login-input min-h-[42px]"
+                    placeholder={f.placeholder}
+                  />
+                </div>
+              </div>
+            ))}
 
-                  <div className="group">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-2 ml-1">Phone Number</label>
-                    <div className="relative">
-                      <input
-                        name="phone"
-                        type="tel"
-                        required={formData.role === 'public'}
-                        value={formData.phone}
-                        onChange={handleChange}
-                        className="input-field"
-                        placeholder="e.g. 9876543210"
-                      />
-                    </div>
-                  </div>
+            {!isWorker && (
+              <div>
+                <label htmlFor="address" className="mb-1.5 ml-0.5 block text-[10px] font-bold uppercase tracking-widest text-white/70 sm:text-xs">
+                  Address *
+                </label>
+                <div className="relative">
+                  <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} aria-hidden />
+                  <input
+                    id="address"
+                    name="address"
+                    type="text"
+                    required
+                    value={formData.address}
+                    onChange={handleChange}
+                    className="login-input min-h-[42px]"
+                    placeholder="House no, street, city"
+                  />
+                </div>
+              </div>
+            )}
 
-                  <div className="group">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-2 ml-1">Address</label>
-                    <div className="relative">
-                      <input
-                        name="address"
-                        type="text"
-                        required={formData.role === 'public'}
-                        value={formData.address}
-                        onChange={handleChange}
-                        className="input-field"
-                        placeholder="e.g. House no, street, city"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="group">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-2 ml-1">Password</label>
-                    <div className="relative">
-                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-muted/40 group-focus-within:text-primary transition-colors" size={18} />
-                      <input
-                        name="password"
-                        type="password"
-                        required
-                        value={formData.password}
-                        onChange={handleChange}
-                        className="input-field pl-12"
-                        placeholder="••••••••"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="group">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-2 ml-1">Confirm Password</label>
-                    <div className="relative">
-                      <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-muted/40 group-focus-within:text-primary transition-colors" size={18} />
-                      <input
-                        name="confirmPassword"
-                        type="password"
-                        required
-                        value={formData.confirmPassword}
-                        onChange={handleChange}
-                        className="input-field pl-12"
-                        placeholder="••••••••"
-                      />
-                    </div>
-                  </div>
+            {isWorker && (
+              <div className="space-y-3.5">
+                {/* Worker Category Select */}
+                <div>
+                  <label htmlFor="duty_position" className="mb-1.5 ml-0.5 block text-[10px] font-bold uppercase tracking-widest text-white/70 sm:text-xs">
+                    Worker Category *
+                  </label>
+                  <select
+                    id="duty_position"
+                    name="duty_position"
+                    required
+                    value={formData.duty_position}
+                    onChange={handleChange}
+                    className="login-input min-h-[42px] cursor-pointer"
+                  >
+                    {WORKER_DUTY_POSITIONS.map((d) => (
+                      <option key={d} value={d} className="bg-slate-900 text-white">{d}</option>
+                    ))}
+                  </select>
                 </div>
 
-                {/* Role & Location */}
-                <div className="space-y-6">
-                  <div className="group">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-2 ml-1">Account Role</label>
-                    <div className="grid grid-cols-2 gap-2 p-1.5 bg-slate-50 rounded-2xl border-2 border-slate-50">
-                      <button
-                        type="button"
-                        onClick={() => setFormData({ ...formData, role: "public" })}
-                        className={`py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all ${formData.role === "public" ? "bg-white text-primary shadow-sm shadow-blue-100" : "text-muted"}`}
-                      >
-                        Public
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setFormData({ ...formData, role: "worker" })}
-                        className={`py-2.5 rounded-xl font-bold text-[10px] uppercase tracking-widest transition-all ${formData.role === "worker" ? "bg-white text-primary shadow-sm shadow-blue-100" : "text-muted"}`}
-                      >
-                        Worker
-                      </button>
-                    </div>
+                {/* Custom Category Input if 'Other' is chosen */}
+                {formData.duty_position === "Other" && (
+                  <div>
+                    <label htmlFor="custom_role" className="mb-1.5 ml-0.5 block text-[10px] font-bold uppercase tracking-widest text-white/70 sm:text-xs">
+                      Specify Category / Issue *
+                    </label>
+                    <input
+                      id="custom_role"
+                      type="text"
+                      required
+                      placeholder="e.g. Drainage, Pension, etc."
+                      value={customRole}
+                      onChange={(e) => setCustomRole(e.target.value)}
+                      className="login-input min-h-[42px]"
+                    />
                   </div>
+                )}
 
-                  {formData.role === "worker" && (
-                    <div className="group">
-                      <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-2 ml-1">Duty / department</label>
-                      <select
-                        name="duty_position"
-                        required
-                        value={formData.duty_position}
-                        onChange={handleChange}
-                        className="input-field"
-                      >
-                        {WORKER_DUTY_POSITIONS.map((d) => (
-                          <option key={d} value={d}>{d}</option>
-                        ))}
-                      </select>
-                      <p className="text-[9px] text-muted mt-2">
-                        Complaints in this category and your jurisdiction will be routed to you after admin verification.
-                      </p>
-                    </div>
-                  )}
+                {/* State Dropdown */}
+                <div>
+                  <label htmlFor="state" className="mb-1.5 ml-0.5 block text-[10px] font-bold uppercase tracking-widest text-white/70 sm:text-xs">
+                    State *
+                  </label>
+                  <select
+                    id="state"
+                    name="state"
+                    required
+                    value={formData.state}
+                    onChange={(e) => {
+                      setFormData({ ...formData, state: e.target.value, city: "" });
+                    }}
+                    className="login-input min-h-[42px] cursor-pointer"
+                  >
+                    <option value="" className="bg-slate-900 text-white">Select State</option>
+                    {getAllStates().sort().map((s) => (
+                      <option key={s} value={s} className="bg-slate-900 text-white">{s}</option>
+                    ))}
+                  </select>
+                </div>
 
-                  <div className="group">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-2 ml-1">State / UT</label>
-                    <select
-                      name="state"
-                      required={formData.role === "worker"}
-                      value={formData.state}
-                      onChange={(e) => {
-                        const st = e.target.value;
-                        const cities = getCitiesForState(st);
-                        setFormData({ ...formData, state: st, city: cities[0] || "" });
-                      }}
-                      className="input-field"
-                    >
-                      {INDIAN_STATES.map((s) => (
-                        <option key={s} value={s}>{s}</option>
-                      ))}
-                    </select>
-                  </div>
+                {/* District Dropdown */}
+                <div>
+                  <label htmlFor="city" className="mb-1.5 ml-0.5 block text-[10px] font-bold uppercase tracking-widest text-white/70 sm:text-xs">
+                    District *
+                  </label>
+                  <select
+                    id="city"
+                    name="city"
+                    required
+                    disabled={!formData.state}
+                    value={formData.city}
+                    onChange={handleChange}
+                    className="login-input min-h-[42px] cursor-pointer"
+                  >
+                    <option value="" className="bg-slate-900 text-white">
+                      {formData.state ? "Select District" : "Select state first"}
+                    </option>
+                    {formData.state && getDistrictsForState(formData.state).sort().map((d) => (
+                      <option key={d} value={d} className="bg-slate-900 text-white">{d}</option>
+                    ))}
+                  </select>
+                </div>
 
-                  <div className="group">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-2 ml-1">City / Municipality</label>
-                    <div className="relative">
-                      <MapPin className="absolute left-4 top-1/2 -translate-y-1/2 text-muted/40 group-focus-within:text-primary transition-colors pointer-events-none z-[1]" size={18} />
-                      <select
-                        name="city"
-                        required={formData.role === "worker"}
-                        value={formData.city}
-                        onChange={handleChange}
-                        className="input-field pl-12"
-                      >
-                        {getCitiesForState(formData.state).map((c) => (
-                          <option key={c} value={c}>{c}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-
-                  <div className="group">
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-2 ml-1">Ward / Area</label>
-                    <div className="relative">
-                      <Briefcase className="absolute left-4 top-1/2 -translate-y-1/2 text-muted/40 group-focus-within:text-primary transition-colors" size={18} />
-                      <input
-                        name="ward"
-                        type="text"
-                        required={formData.role === "worker"}
-                        value={formData.ward}
-                        onChange={handleChange}
-                        className="input-field pl-12"
-                        placeholder="e.g. Ward 4"
-                      />
-                    </div>
-                  </div>
-
-                  {formData.role === "worker" && (
-                    <>
-                      <div className="group">
-                        <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-2 ml-1">Street / lane (optional)</label>
-                        <input
-                          name="street"
-                          type="text"
-                          value={formData.street}
-                          onChange={handleChange}
-                          className="input-field"
-                          placeholder="For finer address matching"
-                        />
-                      </div>
-                      <div className="group">
-                        <label className="block text-[10px] font-black uppercase tracking-widest text-muted mb-2 ml-1">Village / locality (optional)</label>
-                        <input
-                          name="village"
-                          type="text"
-                          value={formData.village}
-                          onChange={handleChange}
-                          className="input-field"
-                          placeholder="Matches citizen locality when provided"
-                        />
-                      </div>
-                    </>
-                  )}
-
-                  <div className="bg-blue-50/50 p-4 rounded-3xl border border-blue-100 mt-4">
-                    <p className="text-[10px] text-blue-800 font-medium leading-relaxed italic">
-                      {formData.role === 'worker'
-                        ? "Location data is required for smart mission assignment."
-                        : "Location helps us map your complaints to the correct official."}
-                    </p>
+                {/* Specific Area Input */}
+                <div>
+                  <label htmlFor="address" className="mb-1.5 ml-0.5 block text-[10px] font-bold uppercase tracking-widest text-white/70 sm:text-xs">
+                    Area / Location *
+                  </label>
+                  <div className="relative">
+                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} aria-hidden />
+                    <input
+                      id="address"
+                      name="address"
+                      type="text"
+                      required
+                      value={formData.address}
+                      onChange={handleChange}
+                      className="login-input min-h-[42px]"
+                      placeholder="e.g. Ward 5, Gandhi Road"
+                    />
                   </div>
                 </div>
               </div>
+            )}
 
-              <button
-                type="submit"
-                disabled={loading}
-                className="w-full btn-primary flex items-center justify-center gap-3 py-5"
-              >
-                {loading ? (
-                  <Loader2 className="animate-spin" size={18} />
-                ) : (
-                  <>
-                    Initialize Governance Account <ArrowRight size={18} />
-                  </>
-                )}
-              </button>
-            </form>
+            <button type="submit" disabled={loading} className={`inline-flex items-center justify-center gap-2 ${config.btnClass}`}>
+              {loading ? <Loader2 className="animate-spin" size={16} /> : <>Register <ArrowRight size={16} /></>}
+            </button>
+          </form>
 
-            <div className="mt-8 pt-8 border-t border-slate-100 text-center">
-              <p className="text-[10px] text-muted font-bold uppercase tracking-widest leading-loose">
-                Already have an identity? <br />
-                <Link to={`/login?role=${targetRole}`} className="text-primary hover:underline">Access Login Terminal</Link>
-              </p>
-            </div>
-          </Card>
-        </motion.div>
-      </div>
+          <p className="mt-4 border-t border-white/10 pt-4 text-center text-xs text-white/55">
+            Have an account?{" "}
+            <Link to={`/login?role=${targetRole}`} className={`cursor-pointer font-bold hover:underline ${config.linkClass}`}>
+              Sign In
+            </Link>
+          </p>
+        </div>
+      </motion.div>
     </div>
   );
 };
