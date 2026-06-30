@@ -3,11 +3,15 @@ import axios from "axios";
 const raw = String(import.meta.env.VITE_BACKEND_URL || "").trim();
 /**
  * In dev, always use same-origin `/api` so Vite proxies to FastAPI (vite.config.js).
- * In production, use VITE_BACKEND_URL only when explicitly configured.
+ * In production, use VITE_BACKEND_URL if configured. When deployed as a Vercel
+ * experimental service, fallback to the backend route prefix used by the
+ * Vercel backend service: `/_/backend`.
  */
 const base = import.meta.env.DEV
   ? ""
-  : raw.replace(/\/$/, "");
+  : raw
+      ? raw.replace(/\/$/, "")
+      : "/_/backend";
 
 /** Single client: timeouts avoid hanging when API or MongoDB is down */
 export const api = axios.create({
