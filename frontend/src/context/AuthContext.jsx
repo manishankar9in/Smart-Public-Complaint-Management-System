@@ -174,9 +174,21 @@ export const AuthProvider = ({ children }) => {
       }
 
       try {
-        await auth.authStateReady();
+        await new Promise((resolve) => {
+          const unsubscribeInit = onAuthStateChanged(
+            auth,
+            () => {
+              unsubscribeInit();
+              resolve();
+            },
+            () => {
+              unsubscribeInit();
+              resolve();
+            }
+          );
+        });
       } catch (err) {
-        console.error("Firebase authStateReady failed:", err);
+        console.error("Firebase initialization failed:", err);
         if (mounted) setLoading(false);
         return;
       }
