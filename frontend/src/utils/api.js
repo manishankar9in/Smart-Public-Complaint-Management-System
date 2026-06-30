@@ -1,13 +1,13 @@
 import axios from "axios";
 
-const raw = import.meta.env.VITE_BACKEND_URL;
+const raw = String(import.meta.env.VITE_BACKEND_URL || "").trim();
 /**
  * In dev, always use same-origin `/api` so Vite proxies to FastAPI (vite.config.js).
- * That avoids browser CORS even if VITE_BACKEND_URL points at :8000 in .env.
+ * In production, use VITE_BACKEND_URL only when explicitly configured.
  */
 const base = import.meta.env.DEV
   ? ""
-  : (String(raw || "").trim() || "http://localhost:8000").replace(/\/$/, "");
+  : raw.replace(/\/$/, "");
 
 /** Single client: timeouts avoid hanging when API or MongoDB is down */
 export const api = axios.create({
