@@ -14,7 +14,7 @@ export const getCurrentLocation = () => {
       },
       {
         enableHighAccuracy: true,
-        timeout: 15000,
+        timeout: 30000, // Increased to 30s for mobile devices
         maximumAge: 0,
       }
     );

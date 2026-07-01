@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../utils/api";
-import { ClipboardList, MapPin, CheckCircle, AlertCircle, Loader2, Clock } from "lucide-react";
+import { ClipboardList, MapPin, CheckCircle, AlertCircle, Loader2, Clock, Navigation } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "react-toastify";
 import GPSCamera from "../components/GPSCamera";
@@ -136,12 +136,12 @@ const WorkerDashboard = () => {
                   <div className="flex shrink-0 flex-wrap gap-1.5">
                     {c.gps_lat && (
                       <a
-                        href={`https://www.google.com/maps?q=${c.gps_lat},${c.gps_long}`}
+                        href={`https://www.google.com/maps/dir/?api=1&destination=${c.gps_lat},${c.gps_long}`}
                         target="_blank"
                         rel="noreferrer"
-                        className="btn-secondary cursor-pointer px-2 py-1 text-[10px]"
+                        className="btn-primary cursor-pointer px-2 py-1 text-[10px] flex items-center gap-1"
                       >
-                        Map
+                        <Navigation size={12} /> Navigate
                       </a>
                     )}
                     {c.status === "ASSIGNED_TO_WORKER" && (

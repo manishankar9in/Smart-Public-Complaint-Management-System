@@ -142,6 +142,12 @@ export const AuthProvider = ({ children }) => {
           console.error("SignOut during sync error failed:", signOutErr);
         }
         const backendMsg = syncErr.response.data?.detail || "Access denied by server validation.";
+        
+        // Check if this is a worker trying to login via public portal
+        if (backendMsg.includes("WORKER") && backendMsg.includes("PUBLIC")) {
+          throw new Error("This account is registered as a Worker. Please use the Worker Login portal instead.");
+        }
+        
         throw new Error(backendMsg);
       }
       localStorage.setItem(ROLE_STORAGE_KEY, resolvedRole);
@@ -343,6 +349,30 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const adminLogin = async (email, password) => {
+    try {
+      const res = await api.post("/auth/admin-login", { email, password });
+      const adminData = res.data;
+      
+      // Store admin user data
+      const adminUser = {
+        uid: adminData.firebase_uid,
+        email: adminData.email,
+        name: adminData.name,
+        role: "admin",
+        authSource: "admin",
+      };
+      
+      setUser(adminUser);
+      persistRole("admin");
+      localStorage.setItem("auth_user", JSON.stringify(adminUser));
+      
+      return adminData;
+    } catch (error) {
+      throw new Error(mapApiError(error));
+    }
+  };
+
   const loginWithGoogle = async (role = "public") => {
     if (role === "admin") {
       toast.error("Administrative access requires secure credential authentication. Google Sign-In is restricted for Admin.");
@@ -453,6 +483,7 @@ export const AuthProvider = ({ children }) => {
     role,
     loading,
     login,
+    adminLogin,
     loginWorker,
     registerWorker,
     loginWithGoogle,

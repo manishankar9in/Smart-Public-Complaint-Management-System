@@ -14,6 +14,10 @@ import {
   FileText,
   BarChart3,
   LogIn,
+  Phone,
+  Mail,
+  Map,
+  Building2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useAuth } from "../context/AuthContext";
@@ -57,23 +61,6 @@ const roleFeatures = [
       "No Google sign-in — email & password only",
     ],
     loginHint: "Open Login and choose the Worker tab.",
-  },
-  {
-    id: "admin",
-    title: "Municipal Admin",
-    icon: ShieldCheck,
-    iconBg: "bg-indigo-600",
-    border: "border-indigo-500/30",
-    gradient: "bg-gradient-to-br from-indigo-950/90 via-violet-950/80 to-slate-900/85",
-    summary: "Officers oversee complaints, workers, and city analytics.",
-    features: [
-      "Monitor all complaints in real time",
-      "Assign workers by category & location",
-      "Verify resolution proof before closing",
-      "View analytics and response trends",
-      "Sign in with Firebase admin email & password",
-    ],
-    loginHint: "Open Login and choose the Admin tab.",
   },
 ];
 
@@ -210,13 +197,15 @@ const SmartGovernanceHome = () => {
 
           <div className="flex items-center gap-2 sm:gap-3">
             {user?.role ? (
-              <button
-                type="button"
-                onClick={() => navigate(dashboardPath)}
-                className="btn-primary !text-xs sm:!text-sm cursor-pointer"
-              >
-                Dashboard <ArrowRight size={16} aria-hidden />
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={() => navigate(dashboardPath)}
+                  className="btn-primary !text-xs sm:!text-sm cursor-pointer"
+                >
+                  Dashboard <ArrowRight size={16} aria-hidden />
+                </button>
+              </>
             ) : (
               <>
                 <Link
@@ -264,12 +253,22 @@ const SmartGovernanceHome = () => {
             </p>
 
             <div className="flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4">
-              <Link
-                to="/login?role=public"
-                className="btn-primary w-full cursor-pointer px-8 py-3 text-sm sm:w-auto sm:text-base"
-              >
-                Login <LogIn size={18} aria-hidden />
-              </Link>
+              {user?.role ? (
+                <button
+                  type="button"
+                  onClick={() => navigate(dashboardPath)}
+                  className="btn-primary w-full cursor-pointer px-8 py-3 text-sm sm:w-auto sm:text-base"
+                >
+                  Go to Dashboard <ArrowRight size={18} aria-hidden />
+                </button>
+              ) : (
+                <Link
+                  to="/login?role=public"
+                  className="btn-primary w-full cursor-pointer px-8 py-3 text-sm sm:w-auto sm:text-base"
+                >
+                  Login <LogIn size={18} aria-hidden />
+                </Link>
+              )}
               <button
                 type="button"
                 onClick={() => scrollTo("how-it-works")}
@@ -359,15 +358,15 @@ const SmartGovernanceHome = () => {
               Who Uses This Platform?
             </h2>
             <p className="section-subtitle mx-auto max-w-2xl text-base">
-              Three roles — each with dedicated features. Use the{" "}
+              Two primary roles — each with dedicated features. Use the{" "}
               <Link to="/login?role=public" className="font-bold text-amber-400 hover:underline">
                 Login page
               </Link>{" "}
-              and pick User, Worker, or Admin.
+              and pick User or Worker.
             </p>
           </div>
 
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-3 lg:gap-6">
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2 lg:gap-6">
             {roleFeatures.map((role, idx) => (
               <motion.article
                 key={role.id}
@@ -456,34 +455,95 @@ const SmartGovernanceHome = () => {
             Register in under a minute and submit your first complaint today.
           </p>
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4">
-            <Link
-              to="/login?role=public"
-              className="btn-primary w-full cursor-pointer px-8 py-3 text-sm sm:w-auto sm:text-base"
-            >
-              Go to Login <LogIn size={18} aria-hidden />
-            </Link>
-            <Link
-              to="/register?role=public"
-              className="btn-secondary w-full cursor-pointer px-8 py-3 text-sm sm:w-auto sm:text-base"
-            >
-              Register as Citizen
-            </Link>
+            {user?.role ? (
+              <button
+                type="button"
+                onClick={() => navigate(dashboardPath)}
+                className="btn-primary w-full cursor-pointer px-8 py-3 text-sm sm:w-auto sm:text-base"
+              >
+                Go to Dashboard <ArrowRight size={18} aria-hidden />
+              </button>
+            ) : (
+              <>
+                <Link
+                  to="/login?role=public"
+                  className="btn-primary w-full cursor-pointer px-8 py-3 text-sm sm:w-auto sm:text-base"
+                >
+                  Go to Login <LogIn size={18} aria-hidden />
+                </Link>
+                <Link
+                  to="/register?role=public"
+                  className="btn-secondary w-full cursor-pointer px-8 py-3 text-sm sm:w-auto sm:text-base"
+                >
+                  Register as Citizen
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </section>
 
       {/* ── Footer ── */}
-      <footer className="border-t border-white/10 bg-[#080e1a] py-8">
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-4 text-center sm:flex-row sm:px-6 sm:text-left">
-          <div className="flex items-center gap-2">
-            <ShieldCheck size={18} className="text-accent" aria-hidden />
-            <p className="text-sm font-semibold text-slate-400">
-              Smart Public Complaint Priority & Response System
-            </p>
+      <footer className="border-t border-white/10 bg-[#080e1a] py-12">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6">
+          <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
+            <div>
+              <div className="mb-4 flex items-center gap-2">
+                <ShieldCheck size={24} className="text-accent" />
+                <p className="text-base font-bold text-white">
+                  Smart Complaint System
+                </p>
+ </div>
+              <p className="mb-4 text-sm text-slate-400">
+                Real-time governance platform for citizens to report local issues and track resolution progress.
+              </p>
+              <p className="text-xs text-slate-500">
+                © {new Date().getFullYear()} — Municipal Corporation
+              </p>
+            </div>
+            <div>
+              <h4 className="mb-4 text-sm font-bold uppercase tracking-wider text-white">Quick Links</h4>
+              <ul className="space-y-2">
+                <li>
+                  <Link to="/" className="text-sm text-slate-400 hover:text-white transition-colors">
+                    Home
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/login?role=public" className="text-sm text-slate-400 hover:text-white transition-colors">
+                    Citizen Login
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/login?role=worker" className="text-sm text-slate-400 hover:text-white transition-colors">
+                    Worker Login
+                  </Link>
+                </li>
+                <li>
+                  <Link to="/register?role=public" className="text-sm text-slate-400 hover:text-white transition-colors">
+                    Register
+                  </Link>
+                </li>
+              </ul>
+            </div>
+            <div>
+              <h4 className="mb-4 text-sm font-bold uppercase tracking-wider text-white">Contact</h4>
+              <ul className="space-y-2">
+                <li className="flex items-center gap-2 text-sm text-slate-400">
+                  <Phone size={16} className="text-accent" />
+                  <span>6303594756</span>
+                </li>
+                <li className="flex items-center gap-2 text-sm text-slate-400">
+                  <Mail size={16} className="text-accent" />
+                  <span>government@public.in</span>
+                </li>
+                <li className="flex items-center gap-2 text-sm text-slate-400">
+                  <MapPin size={16} className="text-accent" />
+                  <span>Each state will be appeared</span>
+                </li>
+              </ul>
+            </div>
           </div>
-          <p className="text-xs text-slate-600">
-            © {new Date().getFullYear()} — Real-time governance for every citizen
-          </p>
         </div>
       </footer>
     </div>

@@ -15,6 +15,7 @@ class ComplaintCreate(BaseModel):
     street: Optional[str] = None
     village: Optional[str] = None
     ward: Optional[str] = None
+    pincode: Optional[str] = None
 
 class ComplaintResponse(ComplaintCreate):
     id: str = Field(..., alias="_id")

@@ -98,22 +98,42 @@ export default function GPSCamera({ onCapture, label = "Live GPS Photo Proof" })
   };
 
   const drawGpsOverlay = (ctx, w, h, position, timestamp) => {
+    const now = new Date();
     const lines = [
-      `LIVE GPS: ${position.lat.toFixed(6)}, ${position.lng.toFixed(6)}`,
-      `Accuracy: ${formatAccuracy(position.accuracy)}`,
-      `Captured: ${timestamp}`,
+      `LAT: ${position.lat.toFixed(6)} | LNG: ${position.lng.toFixed(6)}`,
+      `ACCURACY: ${formatAccuracy(position.accuracy)}`,
+      `ALTITUDE: ${position.altitude ? `${position.altitude.toFixed(1)}m` : 'N/A'}`,
+      `CAPTURED: ${timestamp}`,
+      `DEVICE TIME: ${now.toLocaleTimeString()}`,
     ];
-    const boxH = 110;
-    ctx.fillStyle = "rgba(0,0,0,0.62)";
+    const boxH = 140;
+    ctx.fillStyle = "rgba(0,0,0,0.7)";
     ctx.fillRect(0, h - boxH, w, boxH);
+    
+    // Header
     ctx.fillStyle = "#4ade80";
-    ctx.font = "bold 16px Arial,sans-serif";
-    ctx.fillText("● GOVERNMENT GPS PROOF", 16, h - boxH + 24);
+    ctx.font = "bold 18px Arial,sans-serif";
+    ctx.fillText("● GOVERNMENT GPS VERIFIED PROOF", 16, h - boxH + 26);
+    
+    // Divider
+    ctx.strokeStyle = "#4ade80";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(16, h - boxH + 36);
+    ctx.lineTo(w - 16, h - boxH + 36);
+    ctx.stroke();
+    
+    // GPS data
     ctx.fillStyle = "#fff";
-    ctx.font = "14px Arial,sans-serif";
+    ctx.font = "13px Arial,sans-serif";
     lines.forEach((line, i) => {
-      ctx.fillText(line, 16, h - boxH + 48 + i * 22);
+      ctx.fillText(line, 16, h - boxH + 54 + i * 18);
     });
+    
+    // Warning text
+    ctx.fillStyle = "#fbbf24";
+    ctx.font = "bold 11px Arial,sans-serif";
+    ctx.fillText("⚠ FRAUDULENT IMAGES ARE PUNISHABLE", 16, h - 12);
   };
 
   const capture = async () => {
@@ -136,8 +156,20 @@ export default function GPSCamera({ onCapture, label = "Live GPS Photo Proof" })
       }
 
       const video = videoRef.current;
-      const w = video.videoWidth;
-      const h = video.videoHeight;
+      const originalW = video.videoWidth;
+      const originalH = video.videoHeight;
+      
+      // Compress image: max 1280x720 resolution for mobile
+      const maxDimension = 1280;
+      let w = originalW;
+      let h = originalH;
+      
+      if (w > maxDimension || h > maxDimension) {
+        const ratio = Math.min(maxDimension / w, maxDimension / h);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+      }
+      
       const canvas = canvasRef.current;
       canvas.width = w;
       canvas.height = h;
@@ -147,7 +179,8 @@ export default function GPSCamera({ onCapture, label = "Live GPS Photo Proof" })
       const timestamp = new Date().toLocaleString();
       drawGpsOverlay(ctx, w, h, position, timestamp);
 
-      const dataUrl = canvas.toDataURL("image/jpeg", 0.9);
+      // Use lower quality (0.7) for faster mobile upload
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
       const meta = { image: dataUrl, coords: { lat: position.lat, lng: position.lng }, timestamp, accuracy: position.accuracy };
       setCaptured(dataUrl);
       setCaptureMeta(meta);

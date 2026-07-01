@@ -31,20 +31,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "react-toastify";
 import { dutyMatchesCategory, workerMatchesComplaint, ADMIN_PROCESSING_STATUSES, isAdminProcessingComplaint } from "../data/categoryMapping";
 import { sendNotification } from "../services/emailService";
-import { Bar } from 'react-chartjs-2';
 import { INDIAN_STATES_WITH_DISTRICTS, getDistrictsForState, getAllStates } from "../data/indianStatesDistricts";
-import { 
-  Chart as ChartJS, 
-  CategoryScale, 
-  LinearScale, 
-  BarElement, 
-  Title as ChartTitle, 
-  Tooltip as ChartTooltip, 
-  Legend 
-} from 'chart.js';
 // Removed react-leaflet map usage per UI update (maps replaced with links/lists)
-
-ChartJS.register(CategoryScale, LinearScale, BarElement, ChartTitle, ChartTooltip, Legend);
 
 const AdminDashboard = () => {
   const [complaints, setComplaints] = useState([]);
@@ -194,7 +182,10 @@ const AdminDashboard = () => {
     awaitingAudit: activeComplaints.filter((c) => c.status === "WORKER_COMPLETED").length,
     critical: activeComplaints.filter((c) => c.priority_level === "Critical").length,
     reopened: activeComplaints.filter((c) => c.status === "REOPENED").length,
-  }), [activeComplaints]);
+    resolved: complaints.filter((c) => c.status === "RESOLVED").length,
+    totalWorkers: workers.length,
+    activeWorkers: workers.filter((w) => (w.active_tasks || 0) > 0).length,
+  }), [activeComplaints, complaints, workers]);
 
   const stateOptions = useMemo(() => getAllStates(), []);
 
@@ -609,7 +600,7 @@ const AdminDashboard = () => {
         </div>
 
         {/* KPI Section — active processing only */}
-        <div ref={dashboardRef} className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+        <div ref={dashboardRef} className="grid grid-cols-2 gap-2 lg:grid-cols-6">
           <div className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-center">
             <Layers size={22} className="mx-auto mb-1 text-blue-700" />
             <p className="text-xl font-black text-blue-900">{stats.inQueue}</p>
@@ -629,6 +620,16 @@ const AdminDashboard = () => {
             <CheckCircle size={22} className="mx-auto mb-1 text-green-800" />
             <p className="text-xl font-black text-green-900">{stats.awaitingAudit}</p>
             <p className="text-[10px] font-bold uppercase text-green-800">Needs Audit</p>
+          </div>
+          <div className="rounded-xl border border-purple-200 bg-purple-50 p-3 text-center">
+            <Users size={22} className="mx-auto mb-1 text-purple-700" />
+            <p className="text-xl font-black text-purple-900">{stats.totalWorkers}</p>
+            <p className="text-[10px] font-bold uppercase text-purple-800">Workers</p>
+          </div>
+          <div className="rounded-xl border border-cyan-200 bg-cyan-50 p-3 text-center">
+            <UserCheck size={22} className="mx-auto mb-1 text-cyan-700" />
+            <p className="text-xl font-black text-cyan-900">{stats.activeWorkers}</p>
+            <p className="text-[10px] font-bold uppercase text-cyan-800">Active</p>
           </div>
         </div>
 
@@ -654,6 +655,7 @@ const AdminDashboard = () => {
             </button>
           ))}
         </div>
+
 
         {/* Field Workers Directory Section */}
         <div ref={workersRef} className="rounded-[32px] bg-white border border-slate-100 p-8 shadow-sm">

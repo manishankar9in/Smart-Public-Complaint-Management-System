@@ -77,10 +77,11 @@ export const reverseGeocode = async (lat, lng) => {
     
     return {
       address: data.display_name || '',
-      city: data.address?.city || '',
+      city: data.address?.city || data.address?.town || data.address?.village || '',
       state: data.address?.state || '',
       country: data.address?.country || '',
-      postcode: data.address?.postcode || ''
+      postcode: data.address?.postcode || '',
+      rawAddress: data.address || {}
     };
   } catch (error) {
     console.error('Reverse geocoding failed:', error);

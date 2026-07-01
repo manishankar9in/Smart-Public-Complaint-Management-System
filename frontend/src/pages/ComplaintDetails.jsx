@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../utils/api";
 import { Card, Badge } from "../components/UI";
 import { useAuth } from "../context/AuthContext";
-// Maps removed: replaced with Google Maps links and static location display
+import GoogleMap from "../components/GoogleMap";
 
 const STATUS_TO_STEP = {
   PENDING_ADMIN_VERIFY: 0,
@@ -124,12 +124,25 @@ const ComplaintDetails = () => {
               Open in Google Maps
             </a>
           </div>
-          <div className="h-80 rounded-2xl overflow-hidden border border-slate-200 flex items-center justify-center p-6">
-            <div className="text-center">
-              <p className="text-sm font-black">GPS Coordinates</p>
-              <p className="text-xs mt-2">{Number(complaint.gps_lat).toFixed(6)}, {Number(complaint.gps_long).toFixed(6)}</p>
-              <p className="text-[10px] text-muted mt-3">{complaint.address}</p>
-            </div>
+          <GoogleMap
+            center={{ lat: complaint.gps_lat, lng: complaint.gps_long }}
+            markers={[
+              {
+                lat: complaint.gps_lat,
+                lng: complaint.gps_long,
+                title: complaint.category,
+                color: complaint.priority_level === "Critical" ? "#dc2626" : complaint.priority_level === "High" ? "#f59e0b" : "#16a34a",
+                infoWindow: `<div style="padding: 8px;"><strong>${complaint.category}</strong><br/><small>${complaint.address}</small></div>`,
+              },
+            ]}
+            height="320px"
+            zoom={15}
+          />
+          <div className="mt-3 text-center">
+            <p className="text-xs text-slate-600">
+              <span className="font-bold">GPS:</span> {Number(complaint.gps_lat).toFixed(6)}, {Number(complaint.gps_long).toFixed(6)}
+            </p>
+            <p className="text-[10px] text-slate-500 mt-1">{complaint.address}</p>
           </div>
         </Card>
       )}

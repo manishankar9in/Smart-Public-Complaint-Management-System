@@ -191,6 +191,7 @@ const DashboardLayout = ({ children }) => {
                 </span>
               )}
             </button>
+
             <div className="mx-0.5 sm:mx-1 h-8 sm:h-10 w-px bg-slate-200"></div>
             <div className="group flex cursor-pointer items-center gap-2 sm:gap-3 pl-0.5 sm:pl-2">
                <div className="hidden text-right sm:block min-w-0">

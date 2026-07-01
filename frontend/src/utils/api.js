@@ -16,7 +16,7 @@ const base = import.meta.env.DEV
 /** Single client: timeouts avoid hanging when API or MongoDB is down */
 export const api = axios.create({
   baseURL: `${base}/api`,
-  timeout: 20000,
+  timeout: 60000, // Increased to 60s for mobile networks with large image uploads
   headers: { "Content-Type": "application/json" },
 });
 

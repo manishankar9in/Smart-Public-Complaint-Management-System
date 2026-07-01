@@ -6,7 +6,7 @@ import { Mail, Lock, Loader2, ArrowRight } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { LOGIN_ROLE_CONFIG } from "../data/roleThemes";
 
-const VALID_ROLES = ["public", "worker", "admin"];
+const VALID_ROLES = ["public", "worker"];
 
 const Login = () => {
   const [email, setEmail] = useState("");
@@ -59,7 +59,13 @@ const Login = () => {
       toast.success(`Welcome to ${config.label} dashboard.`);
       navigate(getTargetDashboard(targetRole), { replace: true });
     } catch (error) {
-      toast.error(error.message || "Sign in failed.");
+      const errorMsg = error.message || "Sign in failed.";
+      toast.error(errorMsg);
+      
+      // If worker account error, show helpful message
+      if (errorMsg.includes("Worker") && errorMsg.includes("Worker Login")) {
+        toast.info("Please click the Worker tab above to login as a worker.", { autoClose: 5000 });
+      }
     } finally {
       setLoading(false);
     }
@@ -153,36 +159,38 @@ const Login = () => {
         </motion.div>
 
         {/* Portal tabs with sliding color indicator */}
-        <div className="login-tab-bar" role="tablist" aria-label="Login portal">
-          <motion.div
-            className={`login-tab-indicator login-tab-indicator-${targetRole}`}
-            layout
-            transition={{ type: "spring", stiffness: 380, damping: 32 }}
-            style={{
-              left: `calc(${tabIndex} * (100% / 3) + 4px)`,
-              width: "calc(33.333% - 8px)",
-            }}
-            aria-hidden
-          />
-          {VALID_ROLES.map((role) => {
-            const rc = LOGIN_ROLE_CONFIG[role];
-            const RIcon = rc.icon;
-            const active = targetRole === role;
-            return (
-              <button
-                key={role}
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => switchRole(role)}
-                className={`login-tab-btn ${active ? `login-tab-active ${rc.tabActive}` : ""}`}
-              >
-                <RIcon size={17} aria-hidden />
-                <span className="text-[9px] font-bold uppercase tracking-wide sm:text-[10px]">{rc.tabLabel}</span>
-              </button>
-            );
-          })}
-        </div>
+        {targetRole !== "admin" && (
+          <div className="login-tab-bar cols-2" role="tablist" aria-label="Login portal">
+            <motion.div
+              className={`login-tab-indicator login-tab-indicator-${targetRole}`}
+              layout
+              transition={{ type: "spring", stiffness: 380, damping: 32 }}
+              style={{
+                left: targetRole === "public" ? "2px" : "calc(50% + 2px)",
+                width: "calc(50% - 4px)",
+              }}
+              aria-hidden
+            />
+            {["public", "worker"].map((role) => {
+              const rc = LOGIN_ROLE_CONFIG[role];
+              const RIcon = rc.icon;
+              const active = targetRole === role;
+              return (
+                <button
+                  key={role}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => switchRole(role)}
+                  className={`login-tab-btn ${active ? `login-tab-active ${rc.tabActive}` : ""}`}
+                >
+                  <RIcon size={17} aria-hidden />
+                  <span className="text-[9px] font-bold uppercase tracking-wide sm:text-[10px]">{rc.tabLabel}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         <AnimatePresence mode="wait">
           <motion.div

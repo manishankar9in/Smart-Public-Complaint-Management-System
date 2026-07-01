@@ -14,6 +14,7 @@ import RaiseComplaint from './pages/RaiseComplaint';
 import WorkerDashboard from './pages/WorkerDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import Login from './pages/Login';
+import AdminLogin from './pages/AdminLogin';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import WorkerResetPassword from './pages/WorkerResetPassword';
@@ -37,6 +38,7 @@ const AppRoutes = () => {
 
       {/* Auth Routes */}
       <Route path="/login" element={<Login />} />
+      <Route path="/admin-login" element={<AdminLogin />} />
       <Route path="/register" element={<Register />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/worker-reset-password" element={<WorkerResetPassword />} />

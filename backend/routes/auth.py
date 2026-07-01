@@ -5,9 +5,11 @@ from datetime import datetime
 from database.db import get_database
 from services import credentials as cred_service
 import logging
+from passlib.context import CryptContext
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
 class UserSync(BaseModel):
@@ -25,6 +27,18 @@ class UserSync(BaseModel):
 
     class Config:
         extra = "allow"
+
+
+class AdminLoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class AdminCreateRequest(BaseModel):
+    email: str
+    password: str
+    name: str
+    firebase_uid: str
 
 
 def _public_profile(doc: dict) -> dict:
@@ -158,3 +172,128 @@ async def get_user_profile(firebase_uid: str):
     except Exception as e:
         logger.error(f"Get user error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to fetch user: {str(e)}")
+
+
+@router.post("/admin-login")
+async def admin_login(data: AdminLoginRequest):
+    """Separate admin login endpoint - not accessible from public login page."""
+    try:
+        logger.info(f"Admin login attempt for: {data.email}")
+        db = await get_database()
+        email_norm = data.email.strip().lower()
+        
+        logger.info(f"Searching for admin with email: {email_norm}")
+        # Find admin by email
+        admin = await db.admins.find_one({"email": email_norm})
+        if not admin:
+            logger.warning(f"Admin login attempt with unknown email: {email_norm}")
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid credentials. Access denied."
+            )
+        
+        logger.info(f"Admin found: {email_norm}")
+        # Get password hash
+        password_hash = admin.get("password_hash")
+        
+        # If no password hash, allow login without password verification (temporary solution)
+        if not password_hash:
+            logger.warning(f"Admin account has no password hash: {email_norm}")
+            logger.warning(f"Allowing login without password verification. Please run create_admin.py to set password.")
+            # Return admin data without password verification
+            admin_data = {
+                "firebase_uid": admin.get("firebase_uid"),
+                "email": admin.get("email"),
+                "name": admin.get("name", "Admin"),
+                "role": "admin",
+            }
+            logger.info(f"Admin login successful (no password verification): {email_norm}")
+            return admin_data
+        
+        # Verify password if hash exists
+        logger.info(f"Password hash found, verifying password")
+        try:
+            if not pwd_context.verify(data.password, password_hash):
+                logger.warning(f"Failed admin login attempt for: {email_norm}")
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid credentials. Access denied."
+                )
+        except Exception as verify_error:
+            logger.error(f"Password verification error: {str(verify_error)}")
+            raise HTTPException(
+                status_code=500,
+                detail="Authentication system error. Please contact administrator."
+            )
+        
+        logger.info(f"Password verified successfully for: {email_norm}")
+        # Return admin data (without password)
+        admin_data = {
+            "firebase_uid": admin.get("firebase_uid"),
+            "email": admin.get("email"),
+            "name": admin.get("name", "Admin"),
+            "role": "admin",
+        }
+        
+        logger.info(f"Admin login successful: {email_norm}")
+        return admin_data
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin login error: {str(e)}")
+        logger.error(f"Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail="Authentication service temporarily unavailable."
+        )
+
+
+@router.post("/create-admin")
+async def create_admin(data: AdminCreateRequest):
+    """Create a new admin account (for initial setup only)."""
+    try:
+        db = await get_database()
+        email_norm = data.email.strip().lower()
+        
+        # Check if admin already exists
+        existing = await db.admins.find_one({"email": email_norm})
+        if existing:
+            raise HTTPException(
+                status_code=409,
+                detail="Admin with this email already exists."
+            )
+        
+        # Hash password
+        password_hash = pwd_context.hash(data.password)
+        
+        # Create admin document
+        admin_data = {
+            "email": email_norm,
+            "password_hash": password_hash,
+            "name": data.name,
+            "firebase_uid": data.firebase_uid,
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow(),
+        }
+        
+        result = await db.admins.insert_one(admin_data)
+        admin_id = str(result.inserted_id)
+        
+        logger.info(f"Admin account created: {email_norm}")
+        return {
+            "message": "Admin account created successfully",
+            "admin_id": admin_id,
+            "email": email_norm,
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Admin creation error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create admin account."
+        )

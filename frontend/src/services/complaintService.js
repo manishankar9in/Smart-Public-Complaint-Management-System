@@ -13,9 +13,34 @@ function asComplaintList(data) {
   return [];
 }
 
+// Retry helper with exponential backoff for mobile networks
+async function retryWithBackoff(fn, maxRetries = 3, delayMs = 1000) {
+  let lastError;
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      // Don't retry on client errors (4xx) except 408 (timeout) and 429 (rate limit)
+      if (err.response && err.response.status >= 400 && err.response.status < 500 && 
+          err.response.status !== 408 && err.response.status !== 429) {
+        throw err;
+      }
+      // Wait before retry with exponential backoff
+      if (i < maxRetries - 1) {
+        const waitTime = delayMs * Math.pow(2, i);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    }
+  }
+  throw lastError;
+}
+
 export async function createComplaint(payload) {
-  const res = await api.post("/complaints/create", payload);
-  return res.data;
+  return retryWithBackoff(async () => {
+    const res = await api.post("/complaints/create", payload);
+    return res.data;
+  }, 3, 1000);
 }
 
 export async function fetchUserComplaints(uid) {
