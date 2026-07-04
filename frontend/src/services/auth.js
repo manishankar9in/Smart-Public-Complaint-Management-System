@@ -36,7 +36,7 @@ export const AuthService = {
     try {
       // For workers, use MongoDB authentication instead of Firebase
       if (role === 'worker') {
-        const res = await api.post('/worker_auth/login', {
+        const res = await api.post('/worker-auth/login', {
           email: email,
           password: password
         });

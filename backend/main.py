@@ -98,13 +98,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting application lifespan...")
-    await connect_to_mongo()
-    try:
-        await asyncio.wait_for(init_collections(), timeout=25.0)
-    except asyncio.TimeoutError:
-        logger.warning("Collection init timed out — check MongoDB.")
-    except Exception as e:
-        logger.warning(f"Collection init failed: {e}")
+    connected = await connect_to_mongo()
+    if connected:
+        try:
+            await asyncio.wait_for(init_collections(), timeout=25.0)
+        except asyncio.TimeoutError:
+            logger.warning("Collection init timed out — check MongoDB.")
+        except Exception as e:
+            logger.warning(f"Collection init failed: {e}")
+    else:
+        logger.warning("MongoDB unavailable; continuing without database initialization.")
     logger.info("Application started successfully")
     yield
     logger.info("Shutting down application...")

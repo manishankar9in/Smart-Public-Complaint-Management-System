@@ -1,15 +1,54 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from typing import Optional
-from datetime import datetime
+from datetime import datetime, timedelta
+from config import settings
 from database.db import get_database
 from services import credentials as cred_service
+import jwt
+from jwt.exceptions import InvalidTokenError
 import logging
-from passlib.context import CryptContext
+import bcrypt
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+security = HTTPBearer(auto_error=False)
+
+
+def _hash_password(raw: str) -> str:
+    return bcrypt.hashpw(raw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+
+
+def _verify_password(raw: str, hashed: str) -> bool:
+    try:
+        return bcrypt.checkpw(raw.encode("utf-8"), hashed.encode("utf-8"))
+    except Exception:
+        return False
+
+
+def create_admin_token(admin_id: str) -> str:
+    expiry = datetime.utcnow() + timedelta(minutes=settings.JWT_EXPIRE_MINUTES)
+    payload = {"sub": admin_id, "role": "admin", "exp": expiry}
+    return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
+
+
+def decode_admin_token(token: str) -> dict:
+    return jwt.decode(token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM])
+
+
+async def get_admin_uid_from_token(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
+) -> str:
+    if not credentials or not credentials.credentials:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = decode_admin_token(credentials.credentials)
+        if payload.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Invalid token role")
+        return str(payload.get("sub"))
+    except InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
 
 class UserSync(BaseModel):
@@ -196,43 +235,31 @@ async def admin_login(data: AdminLoginRequest):
         # Get password hash
         password_hash = admin.get("password_hash")
         
-        # If no password hash, allow login without password verification (temporary solution)
         if not password_hash:
-            logger.warning(f"Admin account has no password hash: {email_norm}")
-            logger.warning(f"Allowing login without password verification. Please run create_admin.py to set password.")
-            # Return admin data without password verification
-            admin_data = {
-                "firebase_uid": admin.get("firebase_uid"),
-                "email": admin.get("email"),
-                "name": admin.get("name", "Admin"),
-                "role": "admin",
-            }
-            logger.info(f"Admin login successful (no password verification): {email_norm}")
-            return admin_data
-        
-        # Verify password if hash exists
-        logger.info(f"Password hash found, verifying password")
-        try:
-            if not pwd_context.verify(data.password, password_hash):
-                logger.warning(f"Failed admin login attempt for: {email_norm}")
-                raise HTTPException(
-                    status_code=401,
-                    detail="Invalid credentials. Access denied."
-                )
-        except Exception as verify_error:
-            logger.error(f"Password verification error: {str(verify_error)}")
+            logger.error(f"Admin account has no password hash: {email_norm}")
             raise HTTPException(
-                status_code=500,
-                detail="Authentication system error. Please contact administrator."
+                status_code=401,
+                detail="Admin account is not configured for password login. Please create or update the admin account."
+            )
+        
+        # Verify password
+        logger.info(f"Password hash found, verifying password")
+        if not _verify_password(data.password, password_hash):
+            logger.warning(f"Failed admin login attempt for: {email_norm}")
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid credentials. Access denied."
             )
         
         logger.info(f"Password verified successfully for: {email_norm}")
-        # Return admin data (without password)
+        token = create_admin_token(admin.get("firebase_uid") or admin.get("email"))
         admin_data = {
             "firebase_uid": admin.get("firebase_uid"),
             "email": admin.get("email"),
             "name": admin.get("name", "Admin"),
             "role": "admin",
+            "access_token": token,
+            "token_type": "bearer",
         }
         
         logger.info(f"Admin login successful: {email_norm}")
@@ -251,6 +278,20 @@ async def admin_login(data: AdminLoginRequest):
         )
 
 
+@router.get("/admin-me")
+async def admin_me(admin_uid: str = Depends(get_admin_uid_from_token)):
+    db = await get_database()
+    admin = await db.admins.find_one({"firebase_uid": admin_uid})
+    if not admin:
+        raise HTTPException(status_code=404, detail="Admin profile not found")
+    return {
+        "firebase_uid": admin.get("firebase_uid"),
+        "email": admin.get("email"),
+        "name": admin.get("name", "Admin"),
+        "role": "admin",
+    }
+
+
 @router.post("/create-admin")
 async def create_admin(data: AdminCreateRequest):
     """Create a new admin account (for initial setup only)."""
@@ -267,7 +308,7 @@ async def create_admin(data: AdminCreateRequest):
             )
         
         # Hash password
-        password_hash = pwd_context.hash(data.password)
+        password_hash = _hash_password(data.password)
         
         # Create admin document
         admin_data = {

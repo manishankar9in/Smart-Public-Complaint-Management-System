@@ -19,10 +19,11 @@ from passlib.context import CryptContext
 from motor.motor_asyncio import AsyncIOMotorClient
 from datetime import datetime
 from getpass import getpass
+from config import settings
 
-# MongoDB connection string (adjust as needed)
-MONGODB_URI = "mongodb://localhost:27017"
-DATABASE_NAME = "smart_complaint_db"
+# MongoDB connection string and database name from backend config
+MONGODB_URI = settings.MONGODB_URI
+DATABASE_NAME = settings.DATABASE_NAME
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 

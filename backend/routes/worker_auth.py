@@ -230,6 +230,7 @@ async def worker_forgot_password(body: WorkerForgotPassword):
             doc = None
 
     reset_link = None
+    email_sent = False
     if doc and cred:
         token = secrets.token_urlsafe(32)
         expires = datetime.utcnow() + timedelta(hours=RESET_TOKEN_HOURS)
@@ -255,7 +256,7 @@ async def worker_forgot_password(body: WorkerForgotPassword):
     response = {
         "message": "If this email is registered as a worker, a password reset link has been sent.",
     }
-    if reset_link and not smtp_configured():
+    if reset_link and (not smtp_configured() or not email_sent):
         response["reset_link"] = reset_link
     return response
 

@@ -1,4 +1,5 @@
 from motor.motor_asyncio import AsyncIOMotorClient
+from fastapi import HTTPException
 from config import settings
 
 class Database:
@@ -7,6 +8,11 @@ class Database:
 
     @property
     def db(self):
+        if not self.client:
+            raise HTTPException(
+                status_code=503,
+                detail="Database connection is offline. Please configure MONGODB_URI correctly."
+            )
         return self.client[self.db_name]
 
     @property
@@ -47,8 +53,8 @@ async def get_database():
     return db_manager
 
 async def connect_to_mongo():
-    # Fail fast when MongoDB is not running (avoids very long hangs on first DB call)
-    uri = settings.MONGODB_URI
+    # Avoid failing the whole app when MongoDB is unavailable in deployment.
+    uri = settings.MONGODB_URI or "mongodb://localhost:27017"
     kwargs = {
         "serverSelectionTimeoutMS": 8000,
         "connectTimeoutMS": 8000,
@@ -58,11 +64,18 @@ async def connect_to_mongo():
     if uri.startswith("mongodb+srv://"):
         kwargs["tls"] = True
 
-    db_manager.client = AsyncIOMotorClient(uri, **kwargs)
-    await db_manager.client.admin.command("ping")
-    print(f"Connected to MongoDB database: {db_manager.db_name}")
+    try:
+        db_manager.client = AsyncIOMotorClient(uri, **kwargs)
+        await db_manager.client.admin.command("ping")
+        print(f"Connected to MongoDB database: {db_manager.db_name}")
+        return True
+    except Exception as exc:
+        db_manager.client = None
+        print(f"MongoDB unavailable: {exc}")
+        return False
 
 async def close_mongo_connection():
     if db_manager.client:
         db_manager.client.close()
+        db_manager.client = None
         print("Closed MongoDB connection.")

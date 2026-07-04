@@ -17,6 +17,7 @@ import { api } from "../utils/api";
 const AuthContext = createContext();
 
 const WORKER_TOKEN_KEY = "smartgov_worker_token";
+const API_TOKEN_KEY = "smartgov_api_token";
 const ROLE_STORAGE_KEY = "role";
 
 function mapApiError(error) {
@@ -160,7 +161,7 @@ export const AuthProvider = ({ children }) => {
     let unsubscribeFirebase = () => {};
 
     const bootstrap = async () => {
-      const token = localStorage.getItem(WORKER_TOKEN_KEY);
+      const token = localStorage.getItem(API_TOKEN_KEY) || localStorage.getItem(WORKER_TOKEN_KEY);
       if (token) {
         try {
           applyAxiosWorkerAuth(token);
@@ -174,6 +175,21 @@ export const AuthProvider = ({ children }) => {
             return;
           }
         } catch {
+          try {
+            const res = await api.get("/auth/admin-me");
+            if (mounted) {
+              const adminData = res.data;
+              if (adminData?.role === "admin") {
+                setUser({ ...adminData, authSource: "admin" });
+                persistRole("admin");
+                setLoading(false);
+                return;
+              }
+            }
+          } catch {
+            // ignore and clear invalid or expired token
+          }
+          localStorage.removeItem(API_TOKEN_KEY);
           localStorage.removeItem(WORKER_TOKEN_KEY);
           applyAxiosWorkerAuth(null);
         }
@@ -232,14 +248,14 @@ export const AuthProvider = ({ children }) => {
               persistRole(syncedUser.role || savedRole);
             }
           } else if (mounted) {
-            if (!localStorage.getItem(WORKER_TOKEN_KEY)) {
+            if (!localStorage.getItem(API_TOKEN_KEY) && !localStorage.getItem(WORKER_TOKEN_KEY)) {
               setUser(null);
               persistRole(null);
             }
           }
         } catch (err) {
           console.error("Auth state change error:", err);
-          if (mounted && !localStorage.getItem(WORKER_TOKEN_KEY)) setUser(null);
+          if (mounted && !localStorage.getItem(API_TOKEN_KEY) && !localStorage.getItem(WORKER_TOKEN_KEY)) setUser(null);
         } finally {
           if (mounted) setLoading(false);
         }
@@ -255,8 +271,8 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    if (user?.authSource === "worker") {
-      const t = localStorage.getItem(WORKER_TOKEN_KEY);
+if (user?.authSource === "worker" || user?.authSource === "admin") {
+        const t = localStorage.getItem(API_TOKEN_KEY) || localStorage.getItem(WORKER_TOKEN_KEY);
       applyAxiosWorkerAuth(t);
     } else {
       applyAxiosWorkerAuth(null);
@@ -271,6 +287,7 @@ export const AuthProvider = ({ children }) => {
         throw new Error("No token received from worker login");
       }
       
+      localStorage.setItem(API_TOKEN_KEY, token);
       localStorage.setItem(WORKER_TOKEN_KEY, token);
       localStorage.setItem(ROLE_STORAGE_KEY, "worker");
       applyAxiosWorkerAuth(token);
@@ -288,6 +305,7 @@ export const AuthProvider = ({ children }) => {
       }
       return res.data;
     } catch (error) {
+      localStorage.removeItem(API_TOKEN_KEY);
       localStorage.removeItem(WORKER_TOKEN_KEY);
       applyAxiosWorkerAuth(null);
       throw new Error(mapApiError(error));
@@ -302,6 +320,7 @@ export const AuthProvider = ({ children }) => {
         throw new Error("No token received from worker registration");
       }
       
+      localStorage.setItem(API_TOKEN_KEY, token);
       localStorage.setItem(WORKER_TOKEN_KEY, token);
       localStorage.setItem(ROLE_STORAGE_KEY, "worker");
       applyAxiosWorkerAuth(token);
@@ -319,6 +338,7 @@ export const AuthProvider = ({ children }) => {
       }
       return res.data;
     } catch (error) {
+      localStorage.removeItem(API_TOKEN_KEY);
       localStorage.removeItem(WORKER_TOKEN_KEY);
       applyAxiosWorkerAuth(null);
       throw new Error(mapApiError(error));
@@ -363,6 +383,12 @@ export const AuthProvider = ({ children }) => {
         authSource: "admin",
       };
       
+      const accessToken = adminData.access_token;
+      if (accessToken) {
+        localStorage.setItem(API_TOKEN_KEY, accessToken);
+        localStorage.removeItem(WORKER_TOKEN_KEY);
+        applyAxiosWorkerAuth(accessToken);
+      }
       setUser(adminUser);
       persistRole("admin");
       localStorage.setItem("auth_user", JSON.stringify(adminUser));
@@ -457,6 +483,7 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     localStorage.removeItem("smartgov_target_role");
+    localStorage.removeItem(API_TOKEN_KEY);
     localStorage.removeItem(WORKER_TOKEN_KEY);
     localStorage.removeItem("auth_user");
     applyAxiosWorkerAuth(null);

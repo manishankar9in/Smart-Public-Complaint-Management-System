@@ -26,7 +26,7 @@ const AdminLogin = () => {
     try {
       await adminLogin(formData.email, formData.password);
       toast.success("Admin login successful");
-      navigate("/admin-dashboard");
+      navigate("/admin/dashboard");
     } catch (err) {
       setError(err.message || "Admin login failed. Please check your credentials.");
       toast.error("Admin login failed");

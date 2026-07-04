@@ -53,10 +53,10 @@ const DashboardLayout = ({ children }) => {
       { icon: PlusCircle, label: "Raise Complaint", path: "/raise-complaint" },
     ],
     worker: [
-      { icon: ClipboardList, label: "Worker Dashboard", path: "/worker-dashboard" },
+      { icon: ClipboardList, label: "Worker Dashboard", path: "/worker/dashboard" },
     ],
     admin: [
-      { icon: ShieldCheck, label: "Admin Dashboard", path: "/admin-dashboard" },
+      { icon: ShieldCheck, label: "Admin Dashboard", path: "/admin/dashboard" },
     ]
   };
 

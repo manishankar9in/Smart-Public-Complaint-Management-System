@@ -18,13 +18,14 @@ const Login = () => {
   const location = useLocation();
 
   const urlRole = new URLSearchParams(location.search).get("role");
-  const targetRole = VALID_ROLES.includes(urlRole) ? urlRole : "public";
+  const defaultRole = location.pathname.includes("/worker") ? "worker" : "public";
+  const targetRole = VALID_ROLES.includes(urlRole) ? urlRole : defaultRole;
   const config = LOGIN_ROLE_CONFIG[targetRole];
   const theme = LOGIN_ROLE_CONFIG[targetRole];
 
   const getTargetDashboard = (role) => {
-    if (role === "admin") return "/admin-dashboard";
-    if (role === "worker") return "/worker-dashboard";
+    if (role === "admin") return "/admin/dashboard";
+    if (role === "worker") return "/worker/dashboard";
     return "/user-dashboard";
   };
 

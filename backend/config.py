@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_FROM_EMAIL: str = ""
 
+    ADMIN_EMAIL: str = "admin@municipality.gov"
+    ADMIN_PASSWORD: str = "Admin@12345"
+    ADMIN_NAME: str = "System Administrator"
+
     model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
 
 settings = Settings()

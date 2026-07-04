@@ -1,6 +1,13 @@
 from datetime import datetime
 
+import bcrypt
+
+from config import settings
 from .db import db_manager
+
+
+def _hash_password(raw: str) -> str:
+    return bcrypt.hashpw(raw.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
 
 async def migrate_credentials_out_of_workers():
@@ -167,6 +174,39 @@ async def migrate_accounts_to_separate_collections():
         print(f"Account migration warning: {e}")
 
 
+async def ensure_bootstrap_admin():
+    """Create or update a bootstrap admin account from environment settings when configured."""
+    email = (settings.ADMIN_EMAIL or "").strip().lower()
+    password = (settings.ADMIN_PASSWORD or "").strip()
+    if not email or not password:
+        return
+
+    db = db_manager.db
+    existing = await db["admins"].find_one({"email": email})
+    admin_data = {
+        "email": email,
+        "name": settings.ADMIN_NAME or "System Administrator",
+        "updated_at": datetime.utcnow(),
+    }
+    if not existing:
+        admin_data.update({
+            "password_hash": _hash_password(password),
+            "firebase_uid": f"admin_{email.replace('@', '_')}",
+            "created_at": datetime.utcnow(),
+        })
+        await db["admins"].insert_one(admin_data)
+        print(f"Created bootstrap admin account for {email}")
+        return
+
+    update_data = {"$set": admin_data}
+    if not existing.get("password_hash"):
+        update_data["$set"]["password_hash"] = _hash_password(password)
+    if not existing.get("firebase_uid"):
+        update_data["$set"]["firebase_uid"] = f"admin_{email.replace('@', '_')}"
+    await db["admins"].update_one({"email": email}, update_data)
+    print(f"Updated bootstrap admin account for {email}")
+
+
 async def init_collections():
     required_collections = [
         "users",
@@ -193,6 +233,7 @@ async def init_collections():
         await migrate_credentials_out_of_workers()
         await migrate_firebase_profiles_to_credentials()
         await sync_all_worker_solved_counts()
+        await ensure_bootstrap_admin()
         print("Initialization complete.")
     except Exception as e:
         print(f"Error during collection initialization: {e}")

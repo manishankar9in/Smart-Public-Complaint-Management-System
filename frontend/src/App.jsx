@@ -39,6 +39,8 @@ const AppRoutes = () => {
       {/* Auth Routes */}
       <Route path="/login" element={<Login />} />
       <Route path="/admin-login" element={<AdminLogin />} />
+      <Route path="/admin/login" element={<AdminLogin />} />
+      <Route path="/worker/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/worker-reset-password" element={<WorkerResetPassword />} />
@@ -66,9 +68,19 @@ const AppRoutes = () => {
           <DashboardLayout><WorkerDashboard /></DashboardLayout>
         </ProtectedRoute>
       } />
+      <Route path="/worker/dashboard" element={
+        <ProtectedRoute allowedRoles={['worker']}>
+          <DashboardLayout><WorkerDashboard /></DashboardLayout>
+        </ProtectedRoute>
+      } />
 
       {/* Admin Routes */}
       <Route path="/admin-dashboard" element={
+        <ProtectedRoute allowedRoles={['admin']}>
+          <DashboardLayout><AdminDashboard /></DashboardLayout>
+        </ProtectedRoute>
+      } />
+      <Route path="/admin/dashboard" element={
         <ProtectedRoute allowedRoles={['admin']}>
           <DashboardLayout><AdminDashboard /></DashboardLayout>
         </ProtectedRoute>

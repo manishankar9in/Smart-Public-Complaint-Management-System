@@ -6,8 +6,8 @@ export const ProtectedRoute = ({ children, allowedRoles }) => {
   const location = useLocation();
 
   const getDashboardForRole = (currentRole) => {
-    if (currentRole === "admin") return "/admin-dashboard";
-    if (currentRole === "worker") return "/worker-dashboard";
+    if (currentRole === "admin") return "/admin/dashboard";
+    if (currentRole === "worker") return "/worker/dashboard";
     return "/user-dashboard";
   };
 

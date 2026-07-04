@@ -3,15 +3,10 @@ import axios from "axios";
 const raw = String(import.meta.env.VITE_BACKEND_URL || "").trim();
 /**
  * In dev, always use same-origin `/api` so Vite proxies to FastAPI (vite.config.js).
- * In production, use VITE_BACKEND_URL if configured. When deployed as a Vercel
- * experimental service, fallback to the backend route prefix used by the
- * Vercel backend service: `/_/backend`.
+ * In production, use VITE_BACKEND_URL if configured. Fallback to same-origin empty string
+ * so that /api matches the relative route mapping in vercel.json.
  */
-const base = import.meta.env.DEV
-  ? ""
-  : raw
-      ? raw.replace(/\/$/, "")
-      : "/_/backend";
+const base = raw ? raw.replace(/\/$/, "") : "";
 
 /** Single client: timeouts avoid hanging when API or MongoDB is down */
 export const api = axios.create({
@@ -23,7 +18,7 @@ export const api = axios.create({
 // Add request interceptor to include auth token
 api.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('smartgov_worker_token');
+    const token = localStorage.getItem('smartgov_api_token') || localStorage.getItem('smartgov_worker_token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
@@ -39,7 +34,8 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Clear token and redirect to login
+      // Clear tokens and redirect to login
+      localStorage.removeItem('smartgov_api_token');
       localStorage.removeItem('smartgov_worker_token');
       localStorage.removeItem('auth_user');
       window.location.href = '/login';

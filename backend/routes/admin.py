@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from database.db import get_database
 from database.mongo_json import mongo_to_jsonable
 from bson import ObjectId
+from routes.auth import get_admin_uid_from_token
 from models.complaint import ComplaintVerifyUpdate, WorkerAssignment, AdminSolutionUpdate
 from datetime import datetime, timedelta
 from scoring_engine.ai_priority import calculate_priority_score
@@ -11,7 +12,7 @@ from services.worker_routing import _location_matches
 from services.notifications import create_notification
 from services.worker_stats import increment_worker_solved, decrement_worker_solved
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_admin_uid_from_token)])
 
 SLA_HOURS = {
     "Critical": 2,
