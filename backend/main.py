@@ -98,16 +98,19 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting application lifespan...")
-    connected = await connect_to_mongo()
-    if connected:
-        try:
-            await asyncio.wait_for(init_collections(), timeout=25.0)
-        except asyncio.TimeoutError:
-            logger.warning("Collection init timed out — check MongoDB.")
-        except Exception as e:
-            logger.warning(f"Collection init failed: {e}")
-    else:
-        logger.warning("MongoDB unavailable; continuing without database initialization.")
+    try:
+        connected = await connect_to_mongo()
+        if connected:
+            try:
+                await asyncio.wait_for(init_collections(), timeout=25.0)
+            except asyncio.TimeoutError:
+                logger.warning("Collection init timed out — check MongoDB.")
+            except Exception as e:
+                logger.warning(f"Collection init failed: {e}")
+        else:
+            logger.warning("MongoDB unavailable; continuing without database initialization.")
+    except Exception as exc:
+        logger.warning(f"MongoDB unavailable during startup: {exc}")
     logger.info("Application started successfully")
     yield
     logger.info("Shutting down application...")
@@ -121,9 +124,13 @@ app = FastAPI(
 
 origins = [
     "http://localhost:5173",
+    "http://localhost:5174",
     "http://127.0.0.1:5173",
+    "http://127.0.0.1:5174",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://smartcomplainx.vercel.app",
+    "https://www.smartcomplainx.vercel.app",
     "https://ai-based-public-complaint-m-git-60314a-manishankar9ins-projects.vercel.app",
 ]
 

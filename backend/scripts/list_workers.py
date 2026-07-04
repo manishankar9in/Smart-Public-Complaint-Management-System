@@ -12,7 +12,7 @@ from database.db import connect_to_mongo, db_manager
 
 async def main():
     await connect_to_mongo()
-    db = db_manager.client[settings.DATABASE_NAME]
+    db = db_manager.client[settings.get_database_name()]
     workers = await db.workers.find().limit(10).to_list(length=10)
     creds = await db.login_credentials.find({'account_type':'worker'}).limit(10).to_list(length=10)
     print("Workers:")

@@ -23,7 +23,7 @@ from config import settings
 
 # MongoDB connection string and database name from backend config
 MONGODB_URI = settings.MONGODB_URI
-DATABASE_NAME = settings.DATABASE_NAME
+DATABASE_NAME = settings.get_database_name()
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -57,10 +57,27 @@ async def create_admin_account():
     if not firebase_uid:
         firebase_uid = f"admin_{email.replace('@', '_')}"
     
+    # Validate connection string
+    if not MONGODB_URI:
+        print("Error: MONGODB_URI is missing or empty! Please configure it in your environment or backend/.env file.")
+        return
+
+    if "localhost" in MONGODB_URI or "127.0.0.1" in MONGODB_URI:
+        print(f"Error: Local database references are not allowed! MONGODB_URI is set to '{MONGODB_URI}', but MongoDB Atlas must be used.")
+        return
+
     # Connect to MongoDB
-    print("\nConnecting to MongoDB...")
+    print("\nConnecting to MongoDB Atlas...")
+    kwargs = {
+        "serverSelectionTimeoutMS": 5000,
+        "connectTimeoutMS": 5000,
+        "socketTimeoutMS": 10000,
+    }
+    if MONGODB_URI.startswith("mongodb+srv://"):
+        kwargs["tls"] = True
+
     try:
-        client = AsyncIOMotorClient(MONGODB_URI)
+        client = AsyncIOMotorClient(MONGODB_URI, **kwargs)
         db = client[DATABASE_NAME]
         
         # Test connection
@@ -69,7 +86,7 @@ async def create_admin_account():
         
     except Exception as e:
         print(f"Error connecting to MongoDB: {e}")
-        print(f"Make sure MongoDB is running at: {MONGODB_URI}")
+        print(f"Could not establish connection to: {MONGODB_URI}")
         return
     
     # Check if admin already exists

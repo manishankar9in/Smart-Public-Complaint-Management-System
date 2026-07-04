@@ -1,10 +1,16 @@
+import logging
 from motor.motor_asyncio import AsyncIOMotorClient
 from fastapi import HTTPException
 from config import settings
 
+logger = logging.getLogger(__name__)
+
 class Database:
     client: AsyncIOMotorClient = None
-    db_name: str = settings.DATABASE_NAME
+
+    @property
+    def db_name(self) -> str:
+        return settings.get_database_name()
 
     @property
     def db(self):
@@ -53,29 +59,38 @@ async def get_database():
     return db_manager
 
 async def connect_to_mongo():
-    # Avoid failing the whole app when MongoDB is unavailable in deployment.
-    uri = settings.MONGODB_URI or "mongodb://localhost:27017"
+    uri = settings.MONGODB_URI
+    if not uri:
+        error_msg = "CRITICAL CONFIGURATION ERROR: MONGODB_URI environment variable is missing or empty! Database connection cannot be initialized."
+        logger.critical(error_msg)
+        raise ValueError(error_msg)
+
+    if "localhost" in uri or "127.0.0.1" in uri:
+        error_msg = f"CRITICAL CONFIGURATION ERROR: Local database references are not allowed! MONGODB_URI is set to '{uri}', but MongoDB Atlas must be used."
+        logger.critical(error_msg)
+        raise ValueError(error_msg)
+
+    logger.info("Initializing connection to MongoDB Atlas...")
     kwargs = {
-        "serverSelectionTimeoutMS": 8000,
-        "connectTimeoutMS": 8000,
-        "socketTimeoutMS": 15000,
+        "serverSelectionTimeoutMS": 5000,
+        "connectTimeoutMS": 5000,
+        "socketTimeoutMS": 10000,
     }
-    # Atlas (mongodb+srv) uses TLS automatically; local mongodb:// does not need it.
     if uri.startswith("mongodb+srv://"):
         kwargs["tls"] = True
 
     try:
         db_manager.client = AsyncIOMotorClient(uri, **kwargs)
         await db_manager.client.admin.command("ping")
-        print(f"Connected to MongoDB database: {db_manager.db_name}")
+        logger.info(f"Successfully connected to MongoDB database: {db_manager.db_name}")
         return True
     except Exception as exc:
         db_manager.client = None
-        print(f"MongoDB unavailable: {exc}")
-        return False
+        logger.critical(f"MongoDB connection failed: {exc}")
+        raise RuntimeError(f"Database connection failed: {exc}") from exc
 
 async def close_mongo_connection():
     if db_manager.client:
         db_manager.client.close()
         db_manager.client = None
-        print("Closed MongoDB connection.")
+        logger.info("Closed MongoDB connection.")

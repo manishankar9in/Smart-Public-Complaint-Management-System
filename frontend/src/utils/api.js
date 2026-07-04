@@ -1,12 +1,16 @@
 import axios from "axios";
 
 const raw = String(import.meta.env.VITE_BACKEND_URL || "").trim();
+const isLocalDev =
+  typeof window !== "undefined" &&
+  /^(localhost|127\.0\.0\.1)$/.test(window.location.hostname) &&
+  window.location.port !== "";
 /**
- * In dev, always use same-origin `/api` so Vite proxies to FastAPI (vite.config.js).
- * In production, use VITE_BACKEND_URL if configured. Fallback to same-origin empty string
- * so that /api matches the relative route mapping in vercel.json.
+ * In local development, always use same-origin `/api` so Vite proxies to FastAPI.
+ * In production, use VITE_BACKEND_URL when provided. Fallback to same-origin empty string
+ * so that `/api` matches the relative route mapping in vercel.json.
  */
-const base = raw ? raw.replace(/\/$/, "") : "";
+const base = isLocalDev ? "" : raw ? raw.replace(/\/$/, "") : "";
 
 /** Single client: timeouts avoid hanging when API or MongoDB is down */
 export const api = axios.create({

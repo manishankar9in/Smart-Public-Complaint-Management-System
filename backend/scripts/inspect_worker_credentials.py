@@ -13,7 +13,7 @@ from database.db import connect_to_mongo, db_manager
 
 async def inspect_workers(email: str | None):
     await connect_to_mongo()
-    db = db_manager.client[settings.DATABASE_NAME]
+    db = db_manager.client[settings.get_database_name()]
 
     if email:
         email_norm = email.strip().lower()

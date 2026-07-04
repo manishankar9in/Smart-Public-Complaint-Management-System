@@ -1,4 +1,6 @@
+import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -7,8 +9,8 @@ _ENV_FILE = Path(__file__).resolve().parent / ".env"
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "Smart Public Complaint Priority and Response System"
-    MONGODB_URI: str = "mongodb://localhost:27017"
-    DATABASE_NAME: str = "public_complaint_system"
+    MONGODB_URI: str = os.getenv("MONGODB_URI") or ""
+    DATABASE_NAME: str = "smart_public"
     FIREBASE_PROJECT_ID: str = ""
     JWT_SECRET: str = "change-me-in-production-use-long-random-string"
     JWT_ALGORITHM: str = "HS256"
@@ -26,6 +28,18 @@ class Settings(BaseSettings):
     ADMIN_NAME: str = "System Administrator"
 
     model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
+
+    def get_database_name(self) -> str:
+        explicit_name = (self.DATABASE_NAME or "").strip()
+        if explicit_name:
+            return explicit_name
+
+        parsed_uri = urlparse(self.MONGODB_URI or "")
+        if parsed_uri.path and parsed_uri.path != "/":
+            return parsed_uri.path.lstrip("/")
+
+        return "smart_public"
+
 
 settings = Settings()
 

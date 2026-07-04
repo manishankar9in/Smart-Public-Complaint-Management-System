@@ -11,7 +11,7 @@ from database.db import connect_to_mongo, db_manager
 
 async def main(email):
     await connect_to_mongo()
-    db = db_manager.client[settings.DATABASE_NAME]
+    db = db_manager.client[settings.get_database_name()]
     cred = await db.login_credentials.find_one({'account_type':'worker','email': email.strip().lower()})
     if not cred:
         print('No credentials found for', email)
