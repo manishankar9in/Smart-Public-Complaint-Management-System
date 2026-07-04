@@ -19,6 +19,14 @@
       "dest": "backend/api/index.py"
     },
     {
+      "src": "/docs",
+      "dest": "backend/api/index.py"
+    },
+    {
+      "src": "/openapi.json",
+      "dest": "backend/api/index.py"
+    },
+    {
       "src": "/(.*)",
       "dest": "frontend/$1"
     }
