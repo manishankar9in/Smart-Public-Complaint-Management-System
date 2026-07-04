@@ -1,1 +1,1 @@
-# AI-Based-Public-Complaint-management-system
+# Smart-Public-Complaint-management-system
