@@ -73,7 +73,7 @@ uvicorn backend.main:app --host 0.0.0.0 --port $PORT
 
 Set these in your host environment:
 
-- `MONGODB_URI`
+- `MONGODB_URL`
 - `DATABASE_NAME`
 - `JWT_SECRET`
 - `JWT_ALGORITHM` (default: `HS256`)

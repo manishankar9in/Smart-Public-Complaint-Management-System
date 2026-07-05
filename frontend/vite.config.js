@@ -8,7 +8,7 @@ export default defineConfig({
     proxy: {
       // Same-origin /api in dev — avoids browser CORS (browser → Vite → FastAPI)
       "/api": {
-        target: "http://127.0.0.1:8001",
+        target: "http://127.0.0.1:8000",
         changeOrigin: true,
       },
     },
