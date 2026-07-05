@@ -17,7 +17,7 @@ class Database:
         if not self.client:
             raise HTTPException(
                 status_code=503,
-                detail="Database connection is offline. Please configure MONGODB_URI correctly."
+                detail="Database connection is offline. Please configure MONGODB_URL correctly."
             )
         return self.client[self.db_name]
 
@@ -59,14 +59,14 @@ async def get_database():
     return db_manager
 
 async def connect_to_mongo():
-    uri = settings.MONGODB_URI
+    uri = settings.MONGODB_URL
     if not uri:
-        error_msg = "CRITICAL CONFIGURATION ERROR: MONGODB_URI environment variable is missing or empty! Database connection cannot be initialized."
+        error_msg = "CRITICAL CONFIGURATION ERROR: MONGODB_URL environment variable is missing or empty! Database connection cannot be initialized."
         logger.critical(error_msg)
         raise ValueError(error_msg)
 
     if "localhost" in uri or "127.0.0.1" in uri:
-        error_msg = f"CRITICAL CONFIGURATION ERROR: Local database references are not allowed! MONGODB_URI is set to '{uri}', but MongoDB Atlas must be used."
+        error_msg = f"CRITICAL CONFIGURATION ERROR: Local database references are not allowed! MONGODB_URL is set to '{uri}', but MongoDB Atlas must be used."
         logger.critical(error_msg)
         raise ValueError(error_msg)
 
