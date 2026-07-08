@@ -11,6 +11,8 @@ from utils.validators import (
     sanitize_address,
     validate_coordinates,
     validate_pincode,
+    calculate_distance_meters,
+    calculate_text_similarity,
 )
 import logging
 
@@ -31,6 +33,178 @@ async def get_sla_hours(db):
     if settings and isinstance(settings.get("value"), dict):
         return settings["value"]
     return SLA_HOURS
+
+
+async def check_duplicate_complaint(db, complaint: ComplaintCreate) -> dict:
+    """
+    Advanced duplicate complaint detection with multiple criteria.
+    
+    A complaint is flagged as potential duplicate ONLY if:
+    1. Same category
+    2. Within 30-50 meters (Haversine distance)
+    3. Description similarity > 80% (using SequenceMatcher)
+    4. Submitted within 24 hours
+    
+    Args:
+        db: Database connection
+        complaint: The new complaint being submitted
+    
+    Returns:
+        dict with:
+        - is_duplicate (bool): Whether a duplicate was found with high confidence
+        - confidence_score (float): 0.0 to 100.0 percentage
+        - matching_complaint_id (str): ID of similar complaint if found
+        - details (dict): Breakdown of matching criteria
+        - message (str): User-friendly explanation
+    """
+    
+    # Check for recent complaints in the same category
+    duplicate_window_start = datetime.utcnow() - timedelta(hours=24)
+    
+    # Initial query: same category + recent time window
+    # This reduces the search space before expensive distance/similarity calculations
+    recent_complaints = await db.complaints.find({
+        "category": complaint.category,
+        "created_at": {"$gte": duplicate_window_start},
+    }).to_list(length=50)
+    
+    if not recent_complaints:
+        logger.debug(f"No recent complaints in category '{complaint.category}' for duplicate check")
+        return {
+            "is_duplicate": False,
+            "confidence_score": 0.0,
+            "matching_complaint_id": None,
+            "details": {},
+            "message": "No matching complaints found."
+        }
+    
+    logger.info(f"Found {len(recent_complaints)} recent complaints in category '{complaint.category}' for duplicate check")
+    
+    best_match = None
+    best_confidence = 0.0
+    DUPLICATE_THRESHOLD = 0.70  # Require 70%+ confidence to block submission (more conservative)
+    
+    for existing in recent_complaints:
+        try:
+            # Calculate distance using Haversine formula
+            distance_m = calculate_distance_meters(
+                complaint.gps_lat,
+                complaint.gps_long,
+                existing["gps_lat"],
+                existing["gps_long"]
+            )
+            
+            # Distance filter: Must be within 30-50m range for duplicate consideration
+            # Beyond 50m: Skip entirely (definitely not a duplicate)
+            # Under 30m: Could be duplicate (proceed to similarity check)
+            # Between 30-50m: Could be duplicate (proceed to similarity check)
+            if distance_m > 50:
+                logger.debug(f"Existing complaint {existing['_id']} is {distance_m:.1f}m away - outside duplicate range")
+                continue
+            
+            # Calculate description similarity
+            description_similarity = calculate_text_similarity(
+                complaint.description,
+                existing["description"]
+            )
+            
+            # For distances within 30-50m range: require 80%+ description similarity
+            # For distances under 30m: allow slightly lower similarity (70%+) due to proximity
+            min_similarity_threshold = 0.70 if distance_m < 30 else 0.80
+            
+            if description_similarity < min_similarity_threshold:
+                logger.debug(
+                    f"Complaint {existing['_id']}: description similarity {description_similarity:.2%} "
+                    f"below threshold {min_similarity_threshold:.2%} for distance {distance_m:.1f}m"
+                )
+                continue
+            
+            # Time proximity (newer = higher score)
+            time_diff = datetime.utcnow() - existing["created_at"]
+            time_hours = time_diff.total_seconds() / 3600
+            
+            # Don't consider complaints older than 24 hours
+            if time_hours > 24:
+                logger.debug(f"Existing complaint {existing['_id']} is {time_hours:.1f}h old - outside 24h window")
+                continue
+            
+            # Calculate weighted confidence:
+            # - Description similarity: 50% weight (most important)
+            # - Distance: 30% weight (closer = higher confidence)
+            # - Time: 20% weight (more recent = higher confidence)
+            
+            # Normalize distance score (at 50m: 1.0, at 0m: also 1.0, beyond 50m: 0.0)
+            # This creates a range where 30-50m is high confidence
+            if distance_m <= 30:
+                distance_score = 1.0  # Very close
+            else:
+                # Between 30-50m: score decreases as distance increases
+                distance_score = 1.0 - ((distance_m - 30) / 20.0)  # Linear from 1.0 to 0.0
+            
+            # Time score: newer is better
+            time_score = max(0.0, 1.0 - (time_hours / 24.0))
+            
+            # Calculate final confidence:
+            confidence_score = (
+                description_similarity * 0.50 +
+                distance_score * 0.30 +
+                time_score * 0.20
+            )
+            
+            logger.debug(
+                f"Complaint {existing['_id']}: "
+                f"distance={distance_m:.1f}m (score={distance_score:.2f}), "
+                f"description_sim={description_similarity:.2%}, "
+                f"time_hours={time_hours:.1f} (score={time_score:.2f}), "
+                f"confidence={confidence_score:.2%}"
+            )
+            
+            # Track best match
+            if confidence_score > best_confidence:
+                best_confidence = confidence_score
+                best_match = {
+                    "complaint_id": str(existing["_id"]),
+                    "distance_m": distance_m,
+                    "description_similarity": description_similarity,
+                    "time_hours": time_hours,
+                    "confidence": confidence_score
+                }
+        
+        except Exception as e:
+            logger.error(f"Error comparing with complaint {existing.get('_id')}: {str(e)}")
+            continue
+    
+    # Return results
+    # Block only if confidence is high (70%+) AND description similarity is > 80%
+    is_duplicate = (
+        best_confidence >= 0.70 and 
+        best_match and 
+        best_match.get("description_similarity", 0) >= 0.80
+    )
+    
+    result = {
+        "is_duplicate": is_duplicate,
+        "confidence_score": round(best_confidence * 100, 2),  # Convert to percentage
+        "matching_complaint_id": best_match["complaint_id"] if best_match else None,
+        "details": best_match or {},
+        "message": ""
+    }
+    
+    if is_duplicate:
+        result["message"] = (
+            f"Duplicate detection triggered (confidence: {result['confidence_score']}%). "
+            f"A similar complaint exists {best_match['distance_m']:.0f}m away "
+            f"({best_match['description_similarity']:.0%} description match) "
+            f"from {best_match['time_hours']:.1f} hours ago."
+        )
+        logger.warning(
+            f"Duplicate complaint detected for user {complaint.firebase_uid}: "
+            f"matching complaint {best_match['complaint_id']} "
+            f"(confidence: {result['confidence_score']}%)"
+        )
+    
+    return result
+
 
 @router.post("/create", response_model=dict)
 async def create_complaint(complaint: ComplaintCreate, request: Request):
@@ -86,22 +260,30 @@ async def create_complaint(complaint: ComplaintCreate, request: Request):
         complaint_dict["city"] = sanitized_city
         complaint_dict["state"] = sanitized_state
 
-        # Duplicate complaint detection: same category within ~150m in the last 48h
-        duplicate_window_start = datetime.utcnow() - timedelta(hours=48)
-        approx_delta = 0.0015
-        duplicate = await db.complaints.find_one(
-            {
-                "category": complaint.category,
-                "created_at": {"$gte": duplicate_window_start},
-                "gps_lat": {"$gte": complaint.gps_lat - approx_delta, "$lte": complaint.gps_lat + approx_delta},
-                "gps_long": {"$gte": complaint.gps_long - approx_delta, "$lte": complaint.gps_long + approx_delta},
-            }
-        )
-        if duplicate:
-            logger.warning(f"Duplicate complaint detected for user {complaint.firebase_uid}")
+        # Advanced duplicate complaint detection
+        # Checks: category, distance (30-50m), description similarity (>80%), time (24h)
+        duplicate_check = await check_duplicate_complaint(db, complaint)
+        
+        # Store duplicate analysis in complaint for audit trail
+        complaint_dict["duplicate_check"] = {
+            "is_duplicate": duplicate_check["is_duplicate"],
+            "confidence_score": duplicate_check["confidence_score"],
+            "matched_complaint_id": duplicate_check["matching_complaint_id"],
+            "detection_details": duplicate_check["details"],
+            "checked_at": datetime.utcnow()
+        }
+        
+        # Only reject if high confidence duplicate detected
+        if duplicate_check["is_duplicate"]:
+            logger.warning(
+                f"High-confidence duplicate detected for {complaint.firebase_uid}: "
+                f"{duplicate_check['message']}"
+            )
             raise HTTPException(
                 status_code=409,
-                detail="Similar complaint already exists nearby. Please track existing issue or provide additional details.",
+                detail=f"Duplicate complaint detected with {duplicate_check['confidence_score']}% confidence. "
+                       f"Similar complaint already exists nearby ({duplicate_check['details'].get('distance_m', 0):.0f}m away). "
+                       f"Please check existing complaints or provide additional details.",
             )
     
         # AI Priority Scoring (Automated on Submission)
