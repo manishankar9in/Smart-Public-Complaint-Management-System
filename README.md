@@ -1,4 +1,3 @@
-# Smart-Public-Complaint-management-system
 # Smart Public Complaint Management System 🚨
 
 An AI-powered web application that helps citizens report public problems such as potholes, water issues, electricity problems, and road damage. The system automatically identifies the department and priority, assigns the complaint to a nearby worker, and allows admins to monitor and verify the complaint resolution.
