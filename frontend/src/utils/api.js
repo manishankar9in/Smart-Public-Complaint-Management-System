@@ -1,0 +1,68 @@
+import axios from "axios";
+
+const raw = String(import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL || "").trim();
+const isLocalDev =
+  typeof window !== "undefined" &&
+  (/^(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)$/.test(window.location.hostname) ||
+   window.location.port === "5173" ||
+   window.location.port === "3000");
+/**
+ * In local development, always use same-origin `/api` so Vite proxies to FastAPI.
+ * In production, use VITE_BACKEND_URL when provided. Fallback to same-origin empty string
+ * so that `/api` matches the relative route mapping in vercel.json.
+ */
+const base = isLocalDev ? "" : raw ? raw.replace(/\/$/, "") : "";
+
+/** Single client: timeouts avoid hanging when API or MongoDB is down */
+export const api = axios.create({
+  baseURL: `${base}/api`,
+  timeout: 60000, // Increased to 60s for mobile networks with large image uploads
+  headers: { "Content-Type": "application/json" },
+});
+
+// Add request interceptor to include auth token
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('smartgov_api_token') || localStorage.getItem('smartgov_worker_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    return config;
+  },
+  (error) => {
+    return Promise.reject(error);
+  }
+);
+
+// Add response interceptor to handle 401 errors
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      // Clear tokens and redirect to login
+      localStorage.removeItem('smartgov_api_token');
+      localStorage.removeItem('smartgov_worker_token');
+      localStorage.removeItem('auth_user');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
+export function formatApiError(err) {
+  if (err?.code === "ECONNABORTED" || err?.message?.includes("timeout")) {
+    return "Request timed out. Start the backend (uvicorn), ensure MongoDB is running, and check VITE_BACKEND_URL.";
+  }
+  if (!err?.response) {
+    if (err?.message && typeof err.message === "string") {
+      return err.message;
+    }
+    return "Cannot reach the server. Confirm the API is running and VITE_BACKEND_URL in .env.local matches it.";
+  }
+  const d = err.response.data;
+  if (typeof d?.detail === "string") return d.detail;
+  if (Array.isArray(d?.detail)) {
+    return d.detail.map((x) => (typeof x === "string" ? x : x?.msg || JSON.stringify(x))).join(" ");
+  }
+  return err.message || "Request failed";
+}

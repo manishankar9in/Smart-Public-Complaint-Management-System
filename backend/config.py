@@ -1,0 +1,63 @@
+import os
+from pathlib import Path
+from urllib.parse import urlparse
+
+from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_ENV_FILE = Path(__file__).resolve().parent / ".env"
+
+
+class Settings(BaseSettings):
+    PROJECT_NAME: str = "Smart Public Complaint Priority and Response System"
+    MONGODB_URL: str = Field(default="")
+    DATABASE_NAME: str = Field(default="smart_public")
+    FIREBASE_PROJECT_ID: str = ""
+    JWT_SECRET: str = "change-me-in-production-use-long-random-string"
+    JWT_ALGORITHM: str = "HS256"
+    JWT_EXPIRE_MINUTES: int = 60 * 24 * 7
+
+    FRONTEND_URL: str = "http://localhost:5173"
+    SMTP_HOST: str = "smtp-relay.brevo.com"
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_KEY: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_FROM_NAME: str = "Smart Public Complaint System"
+
+    N8N_WEBHOOK_URL: str = ""
+
+    ADMIN_EMAIL: str = "admin@municipality.gov"
+    ADMIN_PASSWORD: str = "Admin@12345"
+    ADMIN_NAME: str = "System Administrator"
+
+    model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
+
+    @property
+    def effective_smtp_user(self) -> str:
+        return (self.SMTP_USERNAME or self.SMTP_USER or "").strip()
+
+    @property
+    def effective_smtp_password(self) -> str:
+        return (self.SMTP_PASSWORD or self.SMTP_KEY or "").strip()
+
+    @property
+    def effective_from_email(self) -> str:
+        return (self.SMTP_FROM_EMAIL or self.effective_smtp_user or "").strip()
+
+    def get_database_name(self) -> str:
+        explicit_name = (self.DATABASE_NAME or "").strip()
+        if explicit_name:
+            return explicit_name
+
+        parsed_uri = urlparse(self.MONGODB_URL or "")
+        if parsed_uri.path and parsed_uri.path != "/":
+            return parsed_uri.path.lstrip("/")
+
+        return "smart_public"
+
+
+settings = Settings()
+
