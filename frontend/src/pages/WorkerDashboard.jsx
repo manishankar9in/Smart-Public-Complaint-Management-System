@@ -19,9 +19,12 @@ const WorkerDashboard = () => {
     if (!user) return;
     try {
       const res = await api.get("/workers/tasks");
-      const list = (res.data || []).sort(
-        (a, b) => new Date(b.created_at) - new Date(a.created_at)
-      );
+      const priorityWeight = { Critical: 4, High: 3, Medium: 2, Low: 1 };
+      const list = (res.data || []).sort((a, b) => {
+        const pDiff = (priorityWeight[b.priority_level] || 0) - (priorityWeight[a.priority_level] || 0);
+        if (pDiff !== 0) return pDiff;
+        return new Date(b.created_at) - new Date(a.created_at);
+      });
       setComplaints(list);
     } catch {
       toast.error("Failed to load assigned tasks.");
@@ -149,13 +152,35 @@ const WorkerDashboard = () => {
               <div key={c._id} className="surface-card p-3">
                 <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
                   <div className="min-w-0">
-                    <p className="text-sm font-black text-black">{c.category}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-black text-black">{c.category}</p>
+                      {c.custom_department && (
+                        <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[9px] font-bold text-indigo-700">
+                          {c.custom_department}
+                        </span>
+                      )}
+                      {c.department && c.category === "Other" && (
+                        <span className="rounded bg-green-50 px-1.5 py-0.5 text-[9px] font-bold text-green-800">
+                          → {c.department}
+                        </span>
+                      )}
+                    </div>
                     <p className="line-clamp-2 text-xs text-slate-600">{c.description}</p>
                     <div className="mt-1.5 flex flex-wrap gap-1.5 text-[10px]">
                       <span className={`rounded border px-1.5 py-0.5 font-bold ${getStatusColor(c.status)}`}>
                         {String(c.status).replace(/_/g, " ")}
                       </span>
-                      <span className="text-red-700 font-bold">{c.priority_level}</span>
+                      <span className={`rounded px-1.5 py-0.5 font-black uppercase text-[9px] ${
+                        c.priority_level === "Critical"
+                          ? "bg-red-100 text-red-700 border border-red-300 animate-pulse"
+                          : c.priority_level === "High"
+                          ? "bg-amber-100 text-amber-800 border border-amber-300"
+                          : c.priority_level === "Medium"
+                          ? "bg-blue-100 text-blue-800"
+                          : "bg-slate-100 text-slate-700"
+                      }`}>
+                        ⚡ {c.priority_level || "Low"}
+                      </span>
                       <span className="flex items-center gap-0.5 text-slate-500">
                         <MapPin size={10} /> {c.village || c.city}, {c.state}
                       </span>

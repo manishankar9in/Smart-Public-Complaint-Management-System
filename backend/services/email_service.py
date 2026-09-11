@@ -5,9 +5,12 @@ and email notification tracking.
 """
 
 import asyncio
+import json
 import logging
 import smtplib
 import socket
+import urllib.error
+import urllib.request
 from datetime import datetime
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
@@ -20,8 +23,15 @@ from config import settings
 logger = logging.getLogger("email_service")
 
 
+def brevo_api_configured() -> bool:
+    """Return True if Brevo REST API key is configured."""
+    return bool(settings.effective_brevo_api_key and settings.effective_from_email)
+
+
 def smtp_configured() -> bool:
-    """Return True if required SMTP settings are available."""
+    """Return True if required email delivery settings (Brevo API or SMTP) are available."""
+    if brevo_api_configured():
+        return True
     return bool(
         settings.SMTP_HOST
         and settings.SMTP_PORT
@@ -33,8 +43,10 @@ def smtp_configured() -> bool:
 def get_email_health() -> Dict[str, Any]:
     """Safe email health check returning public config status without exposing secrets."""
     configured = smtp_configured()
+    mode = "brevo_api" if brevo_api_configured() else "smtp" if configured else "unconfigured"
     return {
         "configured": configured,
+        "mode": mode,
         "smtp_host": settings.SMTP_HOST,
         "smtp_port": settings.SMTP_PORT,
         "sender_configured": bool(settings.effective_from_email),
@@ -81,6 +93,54 @@ def _record_email_log(
         logger.debug(f"[EMAIL] Could not schedule email log: {e}")
 
 
+def _send_via_brevo_api(
+    *,
+    to_email: str,
+    subject: str,
+    html_content: str,
+    text_content: Optional[str] = None,
+    recipient_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Send email directly via Brevo REST API v3 (bypasses SMTP port/IP restrictions)."""
+    api_key = settings.effective_brevo_api_key
+    from_email = settings.effective_from_email or "manishankar9in@gmail.com"
+    from_name = settings.SMTP_FROM_NAME or "Smart Public Complaint System"
+
+    payload = {
+        "sender": {"name": from_name, "email": from_email},
+        "to": [{"email": to_email, "name": recipient_name or to_email.split("@")[0]}],
+        "subject": subject,
+        "htmlContent": html_content,
+    }
+    if text_content:
+        payload["textContent"] = text_content
+
+    req = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "accept": "application/json",
+            "api-key": api_key,
+            "content-type": "application/json",
+            "User-Agent": "SmartGov-Backend/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            res_data = json.loads(response.read().decode())
+            msg_id = res_data.get("messageId", "")
+            logger.info(f"[EMAIL] Successfully delivered via Brevo API to {to_email} (messageId={msg_id})")
+            return {"success": True, "message": "Email sent successfully via Brevo API", "message_id": msg_id}
+    except urllib.error.HTTPError as http_err:
+        raw = http_err.read().decode()
+        logger.error(f"[EMAIL ERROR] Brevo API error ({http_err.code}): {raw}")
+        return {"success": False, "message": f"Brevo API error: {http_err.code}", "error": raw}
+    except Exception as exc:
+        logger.error(f"[EMAIL ERROR] Brevo API connection failed: {exc}")
+        return {"success": False, "message": "Brevo API connection failed", "error": str(exc)}
+
+
 def send_email(
     *,
     to_email: str,
@@ -91,9 +151,7 @@ def send_email(
     complaint_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Centralized low-level email sender via Brevo SMTP using STARTTLS.
-    Distinguishes errors clearly (525 Unauthorized IP, auth failure, connection timeout).
-    Never exposes passwords in logs.
+    Centralized email sender supporting both Brevo REST API v3 and Brevo/Standard SMTP.
     """
     to_email = (to_email or "").strip()
     if not to_email:
@@ -101,21 +159,41 @@ def send_email(
         return {"success": False, "message": "No recipient email provided.", "error": "MISSING_RECIPIENT"}
 
     if not smtp_configured():
-        logger.warning(f"[EMAIL] SMTP not configured — email not sent to {to_email}")
+        logger.warning(f"[EMAIL] Email service not configured — email not sent to {to_email}")
         _record_email_log(
             to_email=to_email,
             subject=subject,
             event=event,
             status="skipped",
             complaint_id=complaint_id,
-            error="SMTP not configured",
+            error="Email credentials not configured",
         )
         return {
             "success": False,
-            "message": "SMTP credentials not configured on server.",
-            "error": "SMTP_NOT_CONFIGURED",
+            "message": "Email credentials not configured on server.",
+            "error": "NOT_CONFIGURED",
         }
 
+    # 1. Try Brevo REST API v3 if API key is provided
+    if settings.effective_brevo_api_key:
+        logger.info(f"[EMAIL] Attempting delivery via Brevo REST API to {to_email}")
+        api_res = _send_via_brevo_api(
+            to_email=to_email,
+            subject=subject,
+            html_content=html_content,
+            text_content=text_content,
+        )
+        if api_res.get("success"):
+            _record_email_log(
+                to_email=to_email,
+                subject=subject,
+                event=event,
+                status="sent",
+                complaint_id=complaint_id,
+            )
+            return api_res
+
+    # 2. Try SMTP transport
     host = settings.SMTP_HOST
     port = settings.SMTP_PORT
     user = settings.effective_smtp_user
@@ -137,18 +215,15 @@ def send_email(
         msg.attach(MIMEText(text_content, "plain", "utf-8"))
     msg.attach(MIMEText(html_content, "html", "utf-8"))
 
-    logger.info(f"[EMAIL] Preparing email to {to_email}")
-    logger.info(f"[EMAIL] Subject: {subject}")
-    logger.info(f"[EMAIL] Connecting to Brevo SMTP ({host}:{port})...")
+    logger.info(f"[EMAIL] Connecting to SMTP ({host}:{port}) to send to {to_email}...")
 
-    server = None
     try:
         server = smtplib.SMTP(host, port, timeout=20)
         server.ehlo()
         server.starttls()
         server.ehlo()
         
-        logger.info("[EMAIL] Authenticating with Brevo SMTP...")
+        logger.info("[EMAIL] Authenticating with SMTP...")
         server.login(user, password)
         logger.info("[EMAIL] SMTP authentication successful")
 
@@ -156,7 +231,7 @@ def send_email(
         refused = server.sendmail(from_email, [to_email], msg.as_string())
         
         if refused:
-            logger.error(f"[EMAIL ERROR] Brevo refused recipient {to_email}: {refused}")
+            logger.error(f"[EMAIL ERROR] Recipient {to_email} refused: {refused}")
             _record_email_log(
                 to_email=to_email,
                 subject=subject,
@@ -165,7 +240,7 @@ def send_email(
                 complaint_id=complaint_id,
                 error=f"Recipient refused: {refused}",
             )
-            return {"success": False, "message": "Recipient address was refused by Brevo.", "error": str(refused)}
+            return {"success": False, "message": "Recipient address was refused.", "error": str(refused)}
 
         logger.info(f"[EMAIL] Email sent successfully to {to_email}")
         _record_email_log(
@@ -182,13 +257,14 @@ def send_email(
         msg_str = str(getattr(auth_err, "smtp_error", auth_err))
         if code == 525 or "525" in msg_str or "unauthorized ip" in msg_str.lower():
             logger.error("[EMAIL ERROR] Brevo rejected connection: 525 Unauthorized IP address")
-            logger.error(
-                "[EMAIL ERROR] Brevo account security restriction: The current server IP is not authorized in your Brevo SMTP settings. Please verify IP authorized list in Brevo dashboard."
+            err_desc = (
+                "Brevo SMTP 525 Unauthorized IP address. To resolve: "
+                "1) In Brevo Dashboard (Transactional -> Configuration -> Authorized IPs), add your current IP 103.238.230.194 or disable IP restriction, "
+                "OR 2) Generate a Brevo v3 API Key (xkeysib-...) and set BREVO_API_KEY in backend/.env"
             )
-            err_desc = "Brevo SMTP connection rejected: 525 Unauthorized IP address. IP authorization required in Brevo account settings."
         else:
             logger.error(f"[EMAIL ERROR] SMTP authentication failed (code {code}): {msg_str}")
-            err_desc = f"SMTP authentication failed: code {code}"
+            err_desc = f"SMTP authentication failed: {msg_str}"
 
         _record_email_log(
             to_email=to_email,
@@ -201,8 +277,8 @@ def send_email(
         return {"success": False, "message": "SMTP authentication failed", "error": err_desc}
 
     except smtplib.SMTPSenderRefused as sender_err:
-        logger.error(f"[EMAIL ERROR] Invalid Brevo sender address ({from_email}): {sender_err}")
-        err_desc = f"Brevo rejected sender email ({from_email}). Ensure sender email is verified in Brevo."
+        logger.error(f"[EMAIL ERROR] Invalid sender address ({from_email}): {sender_err}")
+        err_desc = f"Rejected sender email ({from_email}). Ensure sender email is verified in your email provider."
         _record_email_log(
             to_email=to_email,
             subject=subject,
@@ -211,7 +287,7 @@ def send_email(
             complaint_id=complaint_id,
             error=err_desc,
         )
-        return {"success": False, "message": "Sender email not verified in Brevo.", "error": err_desc}
+        return {"success": False, "message": "Sender email not verified.", "error": err_desc}
 
     except smtplib.SMTPRecipientsRefused as rec_err:
         logger.error(f"[EMAIL ERROR] Recipient rejected: {rec_err}")
@@ -226,8 +302,8 @@ def send_email(
         return {"success": False, "message": "Recipient email rejected", "error": str(rec_err)}
 
     except (socket.timeout, TimeoutError) as timeout_err:
-        logger.error(f"[EMAIL ERROR] Brevo SMTP connection timed out: {timeout_err}")
-        err_desc = "Connection to Brevo SMTP timed out."
+        logger.error(f"[EMAIL ERROR] SMTP connection timed out: {timeout_err}")
+        err_desc = "Connection to SMTP server timed out."
         _record_email_log(
             to_email=to_email,
             subject=subject,
@@ -239,7 +315,7 @@ def send_email(
         return {"success": False, "message": "SMTP connection timed out", "error": err_desc}
 
     except Exception as exc:
-        logger.error(f"[EMAIL ERROR] Failed to send email via Brevo: {exc}")
+        logger.error(f"[EMAIL ERROR] Failed to send email: {exc}")
         _record_email_log(
             to_email=to_email,
             subject=subject,

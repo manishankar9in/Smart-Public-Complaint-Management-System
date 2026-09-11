@@ -230,9 +230,6 @@ async def register_worker(body: WorkerRegister):
             "email": email_norm,
             "message": "Registration successful! Please check your email and click the verification link to activate your account.",
         }
-        # In local/dev mode without SMTP, expose the link so the developer can test
-        if not smtp_configured() or not email_sent:
-            response["verify_link"] = verify_link
         return response
 
     except DuplicateKeyError as dup_err:
@@ -333,8 +330,6 @@ async def resend_worker_verification(body: ResendVerifyRequest):
         "email": email_norm,
         "message": "A new verification link has been sent to your email.",
     }
-    if not smtp_configured() or not email_sent:
-        response["verify_link"] = verify_link
     return response
 
 

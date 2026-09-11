@@ -73,6 +73,10 @@ const AdminDashboard = () => {
   const [modalWorkerCity, setModalWorkerCity] = useState("");
   const [filterByCategoryOnly, setFilterByCategoryOnly] = useState(true);
 
+  // Eligible workers fetched from backend for the selected complaint
+  const [eligibleWorkers, setEligibleWorkers] = useState([]);
+  const [eligibleLoading, setEligibleLoading] = useState(false);
+
   useEffect(() => {
     fetchComplaints();
     fetchWorkers();
@@ -252,14 +256,27 @@ const AdminDashboard = () => {
     }
   };
 
-  const openAssignmentModal = (complaint) => {
+  const openAssignmentModal = async (complaint) => {
     setSelectedComplaint(complaint);
     setModalWorkerSearch("");
-    setModalWorkerState(complaint.state || "");
-    setModalWorkerCity(complaint.city || "");
+    setModalWorkerState("");
+    setModalWorkerCity("");
     setFilterByCategoryOnly(true);
     setSelectedWorker(null);
+    setEligibleWorkers([]);
     setShowAssignmentModal(true);
+    // Fetch eligible workers from backend (department + location + availability validated)
+    setEligibleLoading(true);
+    try {
+      const res = await api.get(`/admin/eligible-workers/${complaint._id}`);
+      setEligibleWorkers(res.data || []);
+    } catch (err) {
+      console.warn("Failed to fetch eligible workers:", err);
+      toast.warn("Could not load eligible workers. Check filters manually.");
+      setEligibleWorkers([]);
+    } finally {
+      setEligibleLoading(false);
+    }
   };
 
   const getWorkersForComplaint = (complaint) => {
@@ -299,56 +316,25 @@ const AdminDashboard = () => {
 
   const handleVerify = async (id) => {
     try {
-      // 1. Initial Verification & AI Scoring
-      await api.put(`/admin/verify/${id}`, { status: "VERIFIED" });
-      
-      // 2. Intelligent Auto-Assignment
-      await api.put(`/admin/assign-worker/${id}`);
-      
-      const c = complaints.find(comp => comp._id === id);
-      // 3. Notify Citizen of Assignment (do not block admin action if EmailJS fails)
-      try {
-        await sendNotification("WORKER_VERIFYING", {
-          to_email: c?.citizen_email || c?.email || "citizen@authority.in",
-          name: c?.citizen_name || "Citizen",
-          complaint_id: id,
-          category: c?.category,
-          address: c?.address,
-          message: "A field worker has been assigned and is verifying your issue on site.",
-        });
-      } catch (emailErr) {
-        console.warn("EmailJS notification failed:", emailErr);
-        toast.warn("Complaint routed, but email notification failed.");
-      }
-
-      toast.success("Complaint verified and assigned to worker.");
+      // Only verify + AI score — do NOT auto-assign.
+      // Admin must open the assignment modal and pick ONE eligible worker.
+      const res = await api.put(`/admin/verify/${id}`, { status: "VERIFIED" });
+      toast.success(
+        `Complaint verified. Priority: ${res.data?.priority || "Scored"}. ` +
+        "Please assign an eligible worker via 'Assign Worker'."
+      );
       fetchComplaints();
     } catch (err) {
       toast.error(
-        "Verification protocol failed: " + (err.response?.data?.detail || err.response?.data || err.message || "Network Error")
+        "Verification failed: " + (err.response?.data?.detail || err.response?.data || err.message || "Network Error")
       );
     }
   };
 
-  const handleAssignOnly = async (id) => {
-    try {
-      await api.put(`/admin/assign-worker/${id}`);
-      const c = complaints.find((comp) => comp._id === id);
-      await sendNotification("WORKER_VERIFYING", {
-        to_email: c?.citizen_email || c?.email || "citizen@authority.in",
-        name: c?.citizen_name || "Citizen",
-        complaint_id: id,
-        category: c?.category,
-        address: c?.address,
-        message: "A field worker has been assigned and is verifying your issue on site.",
-      });
-      toast.success("Worker assigned successfully.");
-      fetchComplaints();
-    } catch (err) {
-      toast.error(
-        "Assign failed: " + (err.response?.data?.detail || err.message || "Network error")
-      );
-    }
+  // handleAssignOnly retained for any legacy call-sites, now simply opens the modal
+  const handleAssignOnly = (id) => {
+    const c = complaints.find((comp) => comp._id === id);
+    if (c) openAssignmentModal(c);
   };
 
   const openAuditModal = (c) => {
@@ -501,19 +487,14 @@ const AdminDashboard = () => {
     return getDistrictsForState(workerStateFilter);
   }, [workerStateFilter]);
 
-  // Modal Filtered Workers
+  // Modal Filtered Workers — uses eligibleWorkers from backend (already filtered by dept+location+availability)
   const modalFilteredWorkers = useMemo(() => {
     if (!selectedComplaint) return [];
     const norm = (s) => String(s || "").trim().toLowerCase();
-    return workers.filter((w) => {
-      // Category filter
-      if (filterByCategoryOnly && !dutyMatchesCategory(w.department, selectedComplaint.category)) {
-        return false;
-      }
-      // Location filter
+    return eligibleWorkers.filter((w) => {
+      // Additional client-side state/city filters if admin wants to narrow down
       if (modalWorkerState && norm(w.state) !== norm(modalWorkerState)) return false;
       if (modalWorkerCity && norm(w.city) !== norm(modalWorkerCity)) return false;
-      
       const q = modalWorkerSearch.toLowerCase().trim();
       if (!q) return true;
       return (
@@ -522,11 +503,12 @@ const AdminDashboard = () => {
         norm(w.department).includes(q)
       );
     });
-  }, [workers, selectedComplaint, modalWorkerSearch, modalWorkerState, modalWorkerCity, filterByCategoryOnly]);
+  }, [eligibleWorkers, selectedComplaint, modalWorkerSearch, modalWorkerState, modalWorkerCity]);
 
   const recommendedWorkers = useMemo(() => {
-    return getWorkersForComplaint(selectedComplaint);
-  }, [selectedComplaint, workers]);
+    // Show top 3 eligible workers (already sorted by fewest active tasks from backend)
+    return eligibleWorkers.slice(0, 3);
+  }, [eligibleWorkers]);
 
   const exportAuditCsv = () => {
     const rows = filteredComplaints;
@@ -929,6 +911,12 @@ const AdminDashboard = () => {
                       <td className="p-3 font-mono text-[10px] font-bold">#{String(c._id).slice(-6).toUpperCase()}</td>
                       <td className="p-3">
                         <p className="font-semibold text-black">{c.category}</p>
+                        {c.custom_department && (
+                          <p className="text-[10px] text-indigo-700 font-medium truncate max-w-[160px]">Custom: {c.custom_department}</p>
+                        )}
+                        {c.department && c.category === "Other" && (
+                          <p className="text-[9px] text-green-800 font-bold uppercase">→ {c.department}</p>
+                        )}
                         {c.sla_deadline && new Date(c.sla_deadline) < new Date() && (
                           <span className="mt-0.5 inline-block rounded bg-red-100 px-1.5 py-0.5 text-[9px] font-bold text-red-800">URGENT · SLA Overdue</span>
                         )}
@@ -1185,6 +1173,16 @@ const AdminDashboard = () => {
                                  <span className="text-[10px] text-muted font-bold uppercase">Category:</span>
                                  <span className="text-[10px] font-black text-secondary">{selectedComplaint.category}</span>
                               </div>
+                              {selectedComplaint.custom_department && (
+                                <div className="flex justify-between">
+                                  <span className="text-[10px] text-muted font-bold uppercase">Custom Dept:</span>
+                                  <span className="text-[10px] font-black text-indigo-600">{selectedComplaint.custom_department}</span>
+                                </div>
+                              )}
+                              <div className="flex justify-between">
+                                 <span className="text-[10px] text-muted font-bold uppercase">Routed Dept:</span>
+                                 <span className="text-[10px] font-black text-green-700">{selectedComplaint.department || "—"}</span>
+                              </div>
                               <div className="flex justify-between">
                                  <span className="text-[10px] text-muted font-bold uppercase">Priority:</span>
                                  <span className={`text-[10px] font-black uppercase px-2 py-1 rounded ${
@@ -1216,18 +1214,26 @@ const AdminDashboard = () => {
                       <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
                         <div className="flex items-center justify-between gap-3">
                           <div>
-                            <p className="text-[10px] font-black uppercase tracking-widest text-muted">Recommended Workers</p>
-                            <p className="text-[9px] text-slate-500">Matches category + location</p>
+                            <p className="text-[10px] font-black uppercase tracking-widest text-muted">Eligible Workers</p>
+                            <p className="text-[9px] text-slate-500">Dept + Location + Availability validated</p>
                           </div>
-                          <span className="rounded-full bg-white px-3 py-1 text-[9px] font-black uppercase tracking-[0.2em] text-slate-700">
-                            {recommendedWorkers.length} found
+                          <span className={`rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-[0.2em] ${
+                            eligibleLoading
+                              ? 'bg-yellow-50 text-yellow-600'
+                              : eligibleWorkers.length > 0
+                              ? 'bg-green-50 text-green-700'
+                              : 'bg-red-50 text-red-600'
+                          }`}>
+                            {eligibleLoading ? 'Loading…' : `${eligibleWorkers.length} eligible`}
                           </span>
                         </div>
-                        {recommendedWorkers.length === 0 ? (
-                          <p className="mt-3 text-[10px] text-slate-500">No nearby workers available for the complaint location. Use the search filters below.</p>
+                        {eligibleLoading ? (
+                          <p className="mt-3 text-[10px] text-slate-500 animate-pulse">Fetching eligible workers from server…</p>
+                        ) : recommendedWorkers.length === 0 ? (
+                          <p className="mt-3 text-[10px] text-slate-500">No eligible workers found for this dept + location.</p>
                         ) : (
                           <div className="mt-4 grid gap-3">
-                            {recommendedWorkers.slice(0, 3).map((worker) => (
+                            {recommendedWorkers.map((worker) => (
                               <button
                                 key={worker.worker_uid}
                                 type="button"

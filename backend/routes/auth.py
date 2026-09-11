@@ -399,8 +399,6 @@ async def send_citizen_verification(body: CitizenVerifyRequest):
         "email": email_norm,
         "message": "Verification email sent! Please check your inbox and click the link to activate your account.",
     }
-    if not smtp_configured() or not email_sent:
-        response["verify_link"] = verify_link   # dev/fallback: show link in response
     return response
 
 

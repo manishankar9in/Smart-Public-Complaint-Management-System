@@ -5,6 +5,7 @@ from datetime import datetime
 class ComplaintCreate(BaseModel):
     firebase_uid: str
     category: str
+    custom_department: Optional[str] = None
     description: str
     proof_image_url: str
     gps_lat: float

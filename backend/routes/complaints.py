@@ -289,7 +289,12 @@ async def create_complaint(complaint: ComplaintCreate, request: Request):
             )
     
         # AI Priority Scoring (Automated on Submission)
-        priority = calculate_priority_score(complaint.category, complaint.description)
+        # Pass custom_department so correct operational department is resolved
+        priority = calculate_priority_score(
+            complaint.category,
+            complaint.description,
+            custom_department=getattr(complaint, "custom_department", None)
+        )
         
         # Existing dashboard compatibility status + new workflow state
         complaint_dict["status"] = "PENDING_ADMIN_VERIFY"
@@ -297,6 +302,7 @@ async def create_complaint(complaint: ComplaintCreate, request: Request):
         complaint_dict["priority_score"] = priority["score"]
         complaint_dict["priority_level"] = priority["level"]
         complaint_dict["department"] = priority["department"]
+        complaint_dict["duty"] = priority.get("duty", "Other")
         complaint_dict["created_at"] = datetime.utcnow()
         complaint_dict["sla_deadline"] = datetime.utcnow() + timedelta(
             hours=sla_hours.get(priority["level"], 24)
@@ -306,6 +312,9 @@ async def create_complaint(complaint: ComplaintCreate, request: Request):
         complaint_dict["completed_at"] = None
         complaint_dict["ai_analysis"] = {
             "category": complaint.category,
+            "custom_department": getattr(complaint, "custom_department", None),
+            "resolved_department": priority["department"],
+            "resolved_duty": priority.get("duty"),
             "severity": priority.get("severity"),
             "urgency": priority.get("urgency"),
             "impact": priority.get("impact"),

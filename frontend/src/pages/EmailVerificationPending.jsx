@@ -13,7 +13,6 @@ export default function EmailVerificationPending() {
   const email = searchParams.get("email") || location.state?.email || "your registered email";
   const role = searchParams.get("role") || location.state?.role || "public";
   const isWorker = role === "worker";
-  const directVerifyLink = location.state?.verifyLink || searchParams.get("verify_link");
 
   const [resending, setResending] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
@@ -115,16 +114,6 @@ export default function EmailVerificationPending() {
         </div>
 
         <div className="mt-6 space-y-3">
-          {directVerifyLink && (
-            <a
-              href={directVerifyLink}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-600 hover:bg-emerald-500 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-600/30 transition-all hover:brightness-110 active:scale-[0.98]"
-            >
-              <CheckCircle size={16} />
-              <span>Click to Verify Immediately (Local / Fast Track)</span>
-            </a>
-          )}
-
           <Link
             to={`/login?role=${role}`}
             className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-blue-600/30 transition-all hover:brightness-110 active:scale-[0.98]"

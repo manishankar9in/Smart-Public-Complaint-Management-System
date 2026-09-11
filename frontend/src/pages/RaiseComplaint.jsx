@@ -17,6 +17,7 @@ export default function RaiseComplaint() {
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({
     category: "",
+    custom_department: "",
     description: "",
     state: "",
     city: "",
@@ -28,7 +29,9 @@ export default function RaiseComplaint() {
   });
 
   const canContinue =
-    form.category && form.description.trim() && form.state && form.city && form.village.trim();
+    form.category &&
+    (form.category !== "Other" || form.custom_department.trim()) &&
+    form.description.trim() && form.state && form.city && form.village.trim();
 
   const detectCurrentLocation = () => {
     if (!navigator.geolocation) {
@@ -125,6 +128,7 @@ export default function RaiseComplaint() {
       const res = await createComplaint({
         firebase_uid: getCitizenUid(user),
         category: form.category,
+        custom_department: form.category === "Other" ? form.custom_department.trim() || null : null,
         description: form.description.trim(),
         proof_image_url: form.proof_image_url,
         gps_lat: parseFloat(form.gps_lat),
@@ -201,7 +205,7 @@ export default function RaiseComplaint() {
                       <button
                         key={cat}
                         type="button"
-                        onClick={() => setForm({ ...form, category: cat })}
+                        onClick={() => setForm({ ...form, category: cat, custom_department: "" })}
                         className={`cursor-pointer rounded-lg border p-2 text-[10px] font-bold leading-tight sm:text-xs ${
                           form.category === cat
                             ? "border-green-600 bg-green-100 text-black"
@@ -212,6 +216,25 @@ export default function RaiseComplaint() {
                       </button>
                     ))}
                   </div>
+
+                  {/* Custom department input shown only when 'Other' is selected */}
+                  {form.category === "Other" && (
+                    <div className="mt-2">
+                      <label className="mb-1 block text-[10px] font-bold uppercase text-green-800">
+                        Specify Department / Problem Type <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        required
+                        value={form.custom_department}
+                        onChange={(e) => setForm({ ...form, custom_department: e.target.value })}
+                        className="input-field min-h-[40px] text-sm"
+                        placeholder="e.g. Drainage Department, Power Grid, Waste Collection, Sewage"
+                      />
+                      <p className="mt-1 text-[9px] text-slate-500">
+                        💡 The system will auto-route to the right department (e.g. &quot;Drainage&quot; → Water Board)
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -378,7 +401,7 @@ export default function RaiseComplaint() {
                 <button
                   type="button"
                   onClick={() => {
-                    setForm({ category: "", description: "", state: "", city: "", village: "", proof_image_url: "", gps_lat: null, gps_long: null, pincode: "" });
+                    setForm({ category: "", custom_department: "", description: "", state: "", city: "", village: "", proof_image_url: "", gps_lat: null, gps_long: null, pincode: "" });
                     setStep(1);
                   }}
                   className="btn-secondary cursor-pointer px-5 py-2 text-sm"

@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     JWT_EXPIRE_MINUTES: int = 60 * 24 * 7
 
     FRONTEND_URL: str = "http://localhost:5173"
+    BREVO_API_KEY: str = ""
     SMTP_HOST: str = "smtp-relay.brevo.com"
     SMTP_PORT: int = 587
     SMTP_USER: str = ""
@@ -34,6 +35,13 @@ class Settings(BaseSettings):
     ADMIN_NAME: str = "System Administrator"
 
     model_config = SettingsConfigDict(env_file=_ENV_FILE, extra="ignore")
+
+    @property
+    def effective_brevo_api_key(self) -> str:
+        key = (self.BREVO_API_KEY or "").strip()
+        if not key and (self.SMTP_PASSWORD or "").startswith("xkeysib-"):
+            key = self.SMTP_PASSWORD.strip()
+        return key
 
     @property
     def effective_smtp_user(self) -> str:

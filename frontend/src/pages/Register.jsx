@@ -232,7 +232,6 @@ const Register = () => {
           state: {
             email: formData.email.trim(),
             role: "worker",
-            verifyLink: res.data?.verify_link,
           },
         });
       } else {

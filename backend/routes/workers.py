@@ -17,8 +17,10 @@ router = APIRouter()
 
 @router.get("/tasks")
 async def get_worker_tasks_me(worker_uid: str = Depends(get_worker_uid_from_token)):
-    """List missions assigned to the authenticated worker (JWT)."""
+    """List missions assigned to the authenticated worker (JWT), sorted by priority then date."""
     db = await get_database()
+    PRIORITY_ORDER = {"Critical": 0, "High": 1, "Medium": 2, "Low": 3}
+
     cursor = db.complaints.find(
         {
             "worker_uid": worker_uid,
@@ -26,6 +28,13 @@ async def get_worker_tasks_me(worker_uid: str = Depends(get_worker_uid_from_toke
         }
     )
     tasks = await cursor.to_list(length=100)
+
+    # Sort: priority level first (Critical→High→Medium→Low), then by created_at descending
+    tasks.sort(key=lambda t: (
+        PRIORITY_ORDER.get(t.get("priority_level", "Low"), 3),
+        -t["created_at"].timestamp() if t.get("created_at") else 0,
+    ))
+
     return [mongo_to_jsonable(t) for t in tasks]
 
 
