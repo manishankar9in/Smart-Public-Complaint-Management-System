@@ -1,11 +1,11 @@
 import axios from "axios";
 
-const raw = String(import.meta.env.VITE_API_URL || import.meta.env.VITE_BACKEND_URL || "").trim();
+const raw = String(import.meta.env.VITE_BACKEND_URL || "").trim();
 const isLocalDev =
   typeof window !== "undefined" &&
   (/^(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+)$/.test(window.location.hostname) ||
-   window.location.port === "5173" ||
-   window.location.port === "3000");
+    window.location.port === "5173" ||
+    window.location.port === "3000");
 /**
  * In local development, always use same-origin `/api` so Vite proxies to FastAPI.
  * In production, use VITE_BACKEND_URL when provided. Fallback to same-origin empty string
