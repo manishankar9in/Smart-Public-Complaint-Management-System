@@ -283,12 +283,18 @@ const Register = () => {
 
       <motion.div className="login-card-3d max-w-lg w-full" initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}>
         <div className="mb-5 text-center">
-          <Link
-            to={`/login?role=${targetRole}`}
-            className="mb-4 inline-flex cursor-pointer text-xs font-semibold text-white/60 transition-colors hover:text-white sm:text-sm"
-          >
-            ← Back to {isWorker ? "Worker" : "User"} Login
-          </Link>
+          <div className="mb-4 flex items-center justify-between">
+            <Link
+              to={`/login?role=${targetRole}`}
+              className="inline-flex cursor-pointer text-xs font-semibold text-white/60 transition-colors hover:text-white sm:text-sm"
+            >
+              ← Back to {isWorker ? "Worker" : "User"} Login
+            </Link>
+            <Link to="/" className="flex items-center gap-2 rounded-xl bg-white/5 px-2.5 py-1 border border-white/10 hover:bg-white/10 transition-all">
+              <img src="/logo-icon.png" alt="Smart Public Complaint" className="h-5 w-5 object-contain" />
+              <span className="text-[10px] font-bold text-white tracking-tight">Smart Public Complaint</span>
+            </Link>
+          </div>
           <AnimatePresence mode="wait">
             <motion.div
               key={targetRole}

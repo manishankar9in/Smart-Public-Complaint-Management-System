@@ -13,6 +13,7 @@ export default function EmailVerificationPending() {
   const email = searchParams.get("email") || location.state?.email || "your registered email";
   const role = searchParams.get("role") || location.state?.role || "public";
   const isWorker = role === "worker";
+  const isGoogleUser = location.state?.isGoogleUser || false;
 
   const [resending, setResending] = useState(false);
   const [resendCooldown, setResendCooldown] = useState(0);
@@ -25,7 +26,6 @@ export default function EmailVerificationPending() {
         const res = await api.post("/worker-auth/resend-verification", { email });
         toast.success(res.data?.message || "Verification link re-sent to your email!");
       } else {
-        // Use our Brevo SMTP backend resend endpoint (not Firebase's unreliable mailer)
         const res = await api.post("/auth/resend-citizen-verification", { email });
         toast.success(res.data?.message || "Verification email re-sent! Please check your inbox.");
       }
@@ -77,6 +77,19 @@ export default function EmailVerificationPending() {
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.4 }}
       >
+        <div className="mb-4 flex items-center justify-between">
+          <Link
+            to={isWorker ? "/login?role=worker" : "/login?role=public"}
+            className="inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-white/60 transition-colors hover:text-white"
+          >
+            ← Back to Login
+          </Link>
+          <Link to="/" className="flex items-center gap-2 rounded-xl bg-white/5 px-2.5 py-1 border border-white/10 hover:bg-white/10 transition-all">
+            <img src="/logo-icon.png" alt="Smart Public Complaint" className="h-5 w-5 object-contain" />
+            <span className="text-[10px] font-bold text-white tracking-tight">Smart Public Complaint</span>
+          </Link>
+        </div>
+
         {/* Animated Icon Badge */}
         <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-gradient-to-tr from-blue-600 to-indigo-500 shadow-xl shadow-blue-500/25">
           <MailCheck size={40} className="text-white animate-pulse" />
@@ -86,9 +99,16 @@ export default function EmailVerificationPending() {
           Check Your Email
         </h1>
 
-        <p className="mt-3 text-sm text-white/70 leading-relaxed">
-          We&apos;ve sent a secure verification link to:
-        </p>
+        {isGoogleUser ? (
+          <p className="mt-3 text-sm text-white/70 leading-relaxed">
+            You signed in with <span className="font-bold text-blue-300">Google</span>. We&apos;ve sent
+            a one-time verification link to your Google email:
+          </p>
+        ) : (
+          <p className="mt-3 text-sm text-white/70 leading-relaxed">
+            We&apos;ve sent a secure verification link to:
+          </p>
+        )}
 
         <div className="mt-2 inline-block rounded-xl bg-white/10 px-4 py-2 font-mono text-sm font-bold text-blue-300 border border-white/10 break-all">
           {email}
@@ -104,7 +124,9 @@ export default function EmailVerificationPending() {
             <span>
               {isWorker
                 ? "Once verified, sign in with your worker email and password."
-                : "Once verified, sign in to submit complaints and track resolutions."}
+                : isGoogleUser
+                  ? "Once verified, click 'Sign in with Google' again to access your account."
+                  : "Once verified, sign in to submit complaints and track resolutions."}
             </span>
           </div>
           <div className="flex items-start gap-2.5 text-xs text-white/50">
@@ -138,13 +160,23 @@ export default function EmailVerificationPending() {
         </div>
 
         <div className="mt-6 border-t border-white/10 pt-4">
-          <Link
-            to={`/register?role=${role}`}
-            className="inline-flex items-center gap-1.5 text-xs font-semibold text-white/60 hover:text-white transition-colors"
-          >
-            <ArrowLeft size={14} />
-            <span>Back to Registration</span>
-          </Link>
+          {isGoogleUser ? (
+            <Link
+              to={`/login?role=${role}`}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-white/60 hover:text-white transition-colors"
+            >
+              <ArrowLeft size={14} />
+              <span>Back to Login</span>
+            </Link>
+          ) : (
+            <Link
+              to={`/register?role=${role}`}
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-white/60 hover:text-white transition-colors"
+            >
+              <ArrowLeft size={14} />
+              <span>Back to Registration</span>
+            </Link>
+          )}
         </div>
       </motion.div>
     </div>

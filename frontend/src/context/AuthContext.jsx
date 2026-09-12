@@ -135,7 +135,7 @@ export const AuthProvider = ({ children }) => {
       name: firebaseUser.displayName || "User",
       role: resolvedRole,
       auth_provider: isGoogle ? "google.com" : "password",
-      email_verified: isGoogle ? true : Boolean(firebaseUser.emailVerified),
+      email_verified: false, // Never trust client-side; backend decides based on DB
       is_login: options.is_login || false,
       ...options.locationData,
     };
@@ -143,13 +143,16 @@ export const AuthProvider = ({ children }) => {
     try {
       const { data: profile } = await api.post("/auth/sync", syncData);
 
-      // If citizen account is not verified and not Google login, block access!
-      if (resolvedRole === "public" && profile && profile.email_verified === false && !isGoogle) {
+      // Block ALL unverified public accounts — Google OR email/password
+      if (resolvedRole === "public" && profile && profile.email_verified === false) {
         if (!options.is_registration) {
           try { await signOut(auth); } catch { /* ignore */ }
           localStorage.removeItem("smartgov_target_role");
           localStorage.removeItem(ROLE_STORAGE_KEY);
-          throw new Error("EMAIL_NOT_VERIFIED: Please check your email inbox and click the verification link before signing in.");
+          const err = new Error("EMAIL_NOT_VERIFIED: Please check your email inbox and click the verification link before signing in.");
+          err.unverifiedEmail = firebaseUser.email;
+          err.isGoogleUser = isGoogle;
+          throw err;
         }
       }
 
@@ -275,9 +278,8 @@ export const AuthProvider = ({ children }) => {
           if (firebaseUser) {
             const savedRole = localStorage.getItem(ROLE_STORAGE_KEY);
             if (savedRole) setRole(savedRole);
-            const isGoogle = firebaseUser.providerData?.some((p) => p.providerId === "google.com");
             const syncedUser = await syncFirebaseUser(firebaseUser, savedRole, { is_login: true });
-            if (mounted && (syncedUser?.email_verified !== false || isGoogle)) {
+            if (mounted && syncedUser?.email_verified !== false) {
               setUser(syncedUser);
               persistRole(syncedUser.role || savedRole);
             }
@@ -389,14 +391,19 @@ if (user?.authSource === "worker" || user?.authSource === "admin") {
           await signOut(auth);
           localStorage.removeItem("smartgov_target_role");
           localStorage.removeItem(ROLE_STORAGE_KEY);
-          throw new Error(
+          const err = new Error(
             "EMAIL_NOT_VERIFIED: Your email address has not been verified. " +
             "Please check your inbox for a verification link from SmartGov."
           );
+          err.unverifiedEmail = email.trim();
+          throw err;
         }
       } catch (checkErr) {
         // If the check itself throws EMAIL_NOT_VERIFIED, re-throw it
-        if (checkErr.message?.startsWith("EMAIL_NOT_VERIFIED:")) throw checkErr;
+        if (checkErr.message?.startsWith("EMAIL_NOT_VERIFIED:")) {
+          checkErr.unverifiedEmail = email.trim();
+          throw checkErr;
+        }
         // If profile not found yet (404) or network error, allow login to proceed
         // (the sync step will create the profile)
         console.warn("Email verify check skipped:", checkErr.message);
@@ -412,7 +419,10 @@ if (user?.authSource === "worker" || user?.authSource === "admin") {
       localStorage.removeItem("smartgov_target_role");
       if (role !== "worker") localStorage.removeItem(ROLE_STORAGE_KEY);
       // Pass through already-mapped errors
-      if (error.message?.startsWith("EMAIL_NOT_VERIFIED:")) throw error;
+      if (error.message?.startsWith("EMAIL_NOT_VERIFIED:")) {
+        error.unverifiedEmail = email.trim();
+        throw error;
+      }
       throw new Error(role === "worker" ? mapApiError(error) : mapFirebaseError(error));
     }
   };
@@ -513,6 +523,7 @@ if (user?.authSource === "worker" || user?.authSource === "admin") {
         return workerData;
       }
 
+      // For public Google sign-in: sync and check verification
       const syncedUser = await syncFirebaseUser(result.user, role);
       if (syncedUser) {
         setUser(syncedUser);
@@ -521,6 +532,12 @@ if (user?.authSource === "worker" || user?.authSource === "admin") {
       return result;
     } catch (error) {
       localStorage.removeItem("smartgov_target_role");
+      // EMAIL_NOT_VERIFIED thrown from syncFirebaseUser — pass through with metadata
+      if (error.message?.startsWith("EMAIL_NOT_VERIFIED")) {
+        error.unverifiedEmail = error.unverifiedEmail || result?.user?.email || "";
+        error.isGoogleUser = true;
+        throw error;
+      }
       if (error.message && !error.code) throw error; // already mapped
       throw new Error(mapFirebaseError(error));
     }

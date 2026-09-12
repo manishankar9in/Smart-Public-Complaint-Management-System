@@ -63,6 +63,18 @@ export default function VerifyWorkerEmail() {
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.4 }}
       >
+        <div className="mb-4 flex items-center justify-between">
+          <Link
+            to="/login?role=worker"
+            className="inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-white/60 transition-colors hover:text-white"
+          >
+            ← Back to Login
+          </Link>
+          <Link to="/" className="flex items-center gap-2 rounded-xl bg-white/5 px-2.5 py-1 border border-white/10 hover:bg-white/10 transition-all">
+            <img src="/logo-icon.png" alt="Smart Public Complaint" className="h-5 w-5 object-contain" />
+            <span className="text-[10px] font-bold text-white tracking-tight">Smart Public Complaint</span>
+          </Link>
+        </div>
         {status === "verifying" && (
           <div className="py-6 space-y-4">
             <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-3xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">

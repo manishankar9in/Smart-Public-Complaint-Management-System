@@ -190,18 +190,18 @@ const SmartGovernanceHome = () => {
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6 sm:py-4">
           <Link
             to="/"
-            className="flex items-center gap-2.5 cursor-pointer group"
+            className="flex items-center gap-3 cursor-pointer group"
             aria-label="Smart Public Complaint System — Home"
           >
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-600 to-indigo-600 shadow-md shadow-cyan-500/25 transition-transform group-hover:scale-105 sm:h-10 sm:w-10">
-              <ShieldCheck size={20} className="text-white" aria-hidden />
+            <div className="flex h-10 w-10 sm:h-11 sm:w-11 items-center justify-center rounded-xl bg-white/10 backdrop-blur-md border border-white/20 p-1 shadow-lg shadow-cyan-500/10 transition-transform group-hover:scale-105">
+              <img src="/logo-icon.png" alt="Logo" className="h-full w-full object-contain" />
             </div>
             <div className="leading-tight">
               <p className="text-sm font-black tracking-tight text-white sm:text-base">
-                Smart Complaint
+                Smart Public Complaint
               </p>
-              <p className="hidden text-[10px] font-semibold uppercase tracking-widest text-cyan-400 sm:block sm:text-xs">
-                Priority &amp; Response System
+              <p className="text-[10px] font-bold uppercase tracking-widest text-emerald-400 sm:text-xs">
+                Stronger Communities | Better Governance
               </p>
             </div>
           </Link>
@@ -263,10 +263,15 @@ const SmartGovernanceHome = () => {
         <div className="absolute inset-0 bg-gradient-to-br from-cyan-950/20 via-transparent to-amber-950/20 pointer-events-none" />
         <div className="relative mx-auto max-w-7xl px-4 text-center sm:px-6">
           <motion.div {...fadeUp} transition={{ duration: 0.5 }}>
-            <span className="mb-6 inline-flex items-center gap-2 rounded-full border border-amber-400/40 bg-gradient-to-r from-amber-500/15 to-orange-500/15 px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-amber-300 shadow-md">
-              <Zap size={14} className="text-amber-400" aria-hidden />
-              AI Priority &amp; Verified Governance
-            </span>
+            {/* Logo Badge in Hero */}
+            <div className="mb-6 flex items-center justify-center">
+              <div className="inline-flex items-center gap-3 rounded-2xl border border-white/15 bg-white/10 px-4 py-2 backdrop-blur-xl shadow-2xl shadow-cyan-500/10">
+                <img src="/logo-icon.png" alt="Smart Public Complaint Emblem" className="h-8 w-8 sm:h-9 sm:w-9 object-contain" />
+                <span className="text-xs sm:text-sm font-black tracking-wide text-white">Smart Public Complaint</span>
+                <span className="hidden sm:inline-block h-3.5 w-px bg-white/20"></span>
+                <span className="hidden sm:inline-block text-[11px] font-bold text-emerald-400 uppercase tracking-widest">Better Governance</span>
+              </div>
+            </div>
 
             <h1 className="mx-auto mb-6 max-w-4xl text-3xl font-black leading-tight tracking-tight text-white sm:text-5xl lg:text-6xl">
               Smart Public Complaint{" "}
@@ -529,11 +534,18 @@ const SmartGovernanceHome = () => {
         <div className="mx-auto max-w-7xl px-4 sm:px-6">
           <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
             <div>
-              <div className="mb-4 flex items-center gap-2">
-                <ShieldCheck size={24} className="text-cyan-400" />
-                <p className="text-base font-bold text-white">
-                  Smart Complaint System
-                </p>
+              <div className="mb-4 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/10 p-1 border border-white/15 shadow-md">
+                  <img src="/logo-icon.png" alt="Logo" className="h-full w-full object-contain" />
+                </div>
+                <div>
+                  <p className="text-base font-black text-white">
+                    Smart Public Complaint
+                  </p>
+                  <p className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                    Stronger Communities | Better Governance
+                  </p>
+                </div>
               </div>
               <p className="mb-4 text-sm text-slate-400">
                 Real-time governance platform for citizens to report local issues and track resolution progress.

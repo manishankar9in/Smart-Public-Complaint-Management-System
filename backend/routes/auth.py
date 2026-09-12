@@ -165,20 +165,23 @@ async def sync_user(data: UserSync):
         existing_user = await db.users.find_one({"email": email_norm})
 
         extra_data = data.dict()
-        is_google = extra_data.get("auth_provider") == "google.com" or getattr(data, "email_verified", False) is True
+        is_google = extra_data.get("auth_provider") == "google.com"
+        is_new_user = existing_user is None
+        is_registration = extra_data.get("is_registration", False)
+        is_login = extra_data.get("is_login", False)
 
-        if is_google:
-            email_verified_status = True
-        elif existing_user:
+        # ALL users start unverified. Preserve existing verified status for returning users.
+        if existing_user:
             email_verified_status = existing_user.get("email_verified", False)
         else:
-            email_verified_status = False
+            email_verified_status = False  # New user — always unverified regardless of provider
 
         user_data = {
             "firebase_uid": data.firebase_uid,
             "email": email_norm,
             "name": data.name or (existing_user.get("name") if existing_user else "User"),
             "email_verified": email_verified_status,
+            "auth_provider": "google.com" if is_google else "password",
             "updated_at": datetime.utcnow(),
         }
         for field in ("state", "city", "ward", "street", "village", "phone", "address"):
@@ -196,12 +199,27 @@ async def sync_user(data: UserSync):
             db, "public", data.firebase_uid, email_norm, data.firebase_uid
         )
 
-        user = await db.users.find_one({"email": email_norm})
-        logger.info(f"Public user synced: {data.firebase_uid} (verified: {email_verified_status})")
+        # For NEW Google users: automatically send a verification email (same as email/password flow)
+        if is_new_user and is_google and not is_registration:
+            from services.email_service import send_citizen_verification_email, smtp_configured
+            verify_token = secrets.token_urlsafe(32)
+            verify_expires = datetime.utcnow() + timedelta(hours=24)
+            name = user_data.get("name") or email_norm.split("@")[0]
+            await cred_service.set_public_email_verify_token(
+                db, data.firebase_uid, email_norm, verify_token, verify_expires
+            )
+            verify_link = f"{settings.FRONTEND_URL.rstrip('/')}/verify-citizen-email?token={verify_token}"
+            if smtp_configured():
+                send_citizen_verification_email(to_email=email_norm, name=name, verify_link=verify_link)
+                logger.info("Sent verification email to new Google user: %s", email_norm)
+            else:
+                logger.warning("SMTP not configured — verification email NOT sent to new Google user: %s", email_norm)
 
-        # If this is a login attempt for an unverified password user, reject with 403
-        is_login = extra_data.get("is_login", False)
-        if is_login and not email_verified_status and not is_google:
+        user = await db.users.find_one({"email": email_norm})
+        logger.info(f"Public user synced: {data.firebase_uid} (verified: {email_verified_status}, google: {is_google}, new: {is_new_user})")
+
+        # Block ALL unverified login attempts — including Google users
+        if is_login and not email_verified_status:
             raise HTTPException(
                 status_code=403,
                 detail="EMAIL_NOT_VERIFIED: Please check your email inbox and click the verification link before signing in.",
@@ -478,7 +496,7 @@ async def verify_citizen_email(token: str, request: Request = None):
 
     # Mark the user as verified in MongoDB users collection
     await db.users.update_one(
-        {"firebase_uid": firebase_uid},
+        {"$or": [{"firebase_uid": firebase_uid}, {"email": email_norm}]},
         {"$set": {"email_verified": True, "updated_at": now}},
     )
 
@@ -495,7 +513,7 @@ async def verify_citizen_email(token: str, request: Request = None):
         "✅ Email Verified!",
         f"Your SmartGov account (<b>{email_norm}</b>) has been successfully verified. You can now sign in.",
         success=True,
-        login_url=f"{settings.FRONTEND_URL}/login?role=public&verified=1",
+        login_url=f"{settings.FRONTEND_URL}/login?role=public&verified=1&email={email_norm}",
     ))
 
 

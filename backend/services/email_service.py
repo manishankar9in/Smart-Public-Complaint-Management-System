@@ -392,10 +392,10 @@ def _get_base_html_template(
             <tr>
               <td>
                 <h1 style="margin:0;color:#ffffff;font-size:18px;font-weight:bold;letter-spacing:0.5px;">
-                  🏛️ SmartGov Public Services
+                  Smart Public Complaint
                 </h1>
-                <p style="margin:4px 0 0 0;color:#94a3b8;font-size:12px;">
-                  Smart Public Complaint Priority and Response System
+                <p style="margin:4px 0 0 0;color:#34d399;font-size:12px;font-weight:600;">
+                  Stronger Communities | Better Governance
                 </p>
               </td>
               <td style="text-align:right;">

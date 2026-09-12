@@ -61,9 +61,22 @@ const WorkerResetPassword = () => {
   return (
     <div className="page-shell theme-recovery flex items-center justify-center p-4 sm:p-6">
       <div className="w-full max-w-md">
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-600 shadow-lg">
-            <HardHat size={28} className="text-white" />
+        <div className="mb-4 flex items-center justify-between">
+          <Link
+            to="/login?role=worker"
+            className="inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-white/60 transition-colors hover:text-white"
+          >
+            ← Back to Login
+          </Link>
+          <Link to="/" className="flex items-center gap-2 rounded-xl bg-white/5 px-2.5 py-1 border border-white/10 hover:bg-white/10 transition-all">
+            <img src="/logo-icon.png" alt="Smart Public Complaint" className="h-5 w-5 object-contain" />
+            <span className="text-[10px] font-bold text-white tracking-tight">Smart Public Complaint</span>
+          </Link>
+        </div>
+
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-6 text-center">
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-3xl border border-slate-700/60 bg-white/10 p-2 text-3xl font-black text-white shadow-xl backdrop-blur-md">
+            <img src="/logo-icon.png" alt="Logo" className="h-full w-full object-contain" />
           </div>
           <h1 className="text-2xl font-black tracking-tight text-slate-100 sm:text-3xl">Set New Password</h1>
           <p className="mt-2 text-sm font-medium text-slate-400">Enter your new worker account password below.</p>

@@ -16,7 +16,7 @@ const AdminLogin = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
-    
+
     if (!formData.email || !formData.password) {
       setError("Please enter both email and password");
       return;
@@ -43,9 +43,21 @@ const AdminLogin = () => {
         className="w-full max-w-md"
       >
         {/* Admin Portal Header */}
-        <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-600 shadow-lg shadow-indigo-500/30">
-            <ShieldCheck size={32} className="text-white" />
+        <div className="mb-6 text-center">
+          <div className="mb-4 flex items-center justify-between">
+            <Link
+              to="/"
+              className="inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-white/60 transition-colors hover:text-white"
+            >
+              ← Back to Home
+            </Link>
+            <Link to="/" className="flex items-center gap-2 rounded-xl bg-white/5 px-2.5 py-1 border border-white/10 hover:bg-white/10 transition-all">
+              <img src="/logo-icon.png" alt="Smart Public Complaint" className="h-5 w-5 object-contain" />
+              <span className="text-[10px] font-bold text-white tracking-tight">Smart Public Complaint</span>
+            </Link>
+          </div>
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-indigo-600 shadow-lg shadow-indigo-500/30 p-2 border border-indigo-400/30">
+            <img src="/logo-icon.png" alt="Admin Portal" className="h-full w-full object-contain" />
           </div>
           <h1 className="text-2xl font-black text-white">Admin Portal</h1>
           <p className="mt-2 text-sm text-slate-400">

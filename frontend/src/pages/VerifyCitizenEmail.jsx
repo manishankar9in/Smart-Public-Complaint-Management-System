@@ -10,6 +10,7 @@ const VerifyCitizenEmail = () => {
 
   const [status, setStatus] = useState("loading"); // "loading" | "success" | "error" | "no-token"
   const [message, setMessage] = useState("");
+  const [verifiedEmail, setVerifiedEmail] = useState("");
   const hasRequestedRef = useRef(false);
 
   useEffect(() => {
@@ -19,10 +20,16 @@ const VerifyCitizenEmail = () => {
       return;
     }
 
+    if (hasRequestedRef.current) return;
+    hasRequestedRef.current = true;
+
     const verify = async () => {
       try {
         const res = await api.get(`/auth/verify-email?token=${encodeURIComponent(token)}`);
         setStatus("success");
+        if (res.data?.email) {
+          setVerifiedEmail(res.data.email);
+        }
         setMessage(res.data?.message || "Your email has been successfully verified! You can now sign in to your account.");
       } catch (err) {
         const detail = err?.response?.data?.detail || err?.message || "Verification failed.";
@@ -63,11 +70,12 @@ const VerifyCitizenEmail = () => {
         }}
       >
         {/* Logo */}
-        <div style={{ fontSize: "28px", fontWeight: "900", color: "#fff", marginBottom: "8px" }}>
-          🏛️ SmartGov
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", marginBottom: "8px" }}>
+          <img src="/logo-icon.png" alt="Logo" style={{ height: "40px", width: "40px", objectFit: "contain" }} />
+          <span style={{ fontSize: "22px", fontWeight: "900", color: "#fff" }}>Smart Public Complaint</span>
         </div>
-        <p style={{ color: "#94a3b8", fontSize: "13px", marginBottom: "36px" }}>
-          Smart Public Complaint Priority &amp; Response System
+        <p style={{ color: "#34d399", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "1px", marginBottom: "32px" }}>
+          Stronger Communities | Better Governance
         </p>
 
         {/* Status Icon */}
@@ -123,7 +131,7 @@ const VerifyCitizenEmail = () => {
         {/* Action Button */}
         {status === "success" && (
           <Link
-            to="/login?role=public&verified=1"
+            to={`/login?role=public&verified=1${verifiedEmail ? `&email=${encodeURIComponent(verifiedEmail)}` : ""}`}
             style={{
               display: "inline-flex",
               alignItems: "center",

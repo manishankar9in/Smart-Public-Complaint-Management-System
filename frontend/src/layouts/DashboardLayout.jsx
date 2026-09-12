@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
-import { 
-  LayoutDashboard, 
-  PlusCircle, 
-  ClipboardList, 
-  ShieldCheck, 
-  LogOut, 
-  Menu, 
+import {
+  LayoutDashboard,
+  PlusCircle,
+  ClipboardList,
+  ShieldCheck,
+  LogOut,
+  Menu,
   Bell,
   User,
   Trash2,
@@ -26,11 +26,10 @@ const SidebarItem = ({ icon: Icon, label, path, active, onClick }) => (
   <Link
     to={path}
     onClick={onClick}
-    className={`group flex items-center gap-3 rounded-lg border-l-4 px-3 sm:px-4 py-2.5 sm:py-3 transition-all cursor-pointer ${
-      active
-        ? "border-blue-600 bg-blue-50 text-blue-900 shadow-sm"
-        : "border-transparent text-slate-700 hover:bg-green-50 hover:text-green-800 active:bg-green-100"
-    }`}
+    className={`group flex items-center gap-3 rounded-lg border-l-4 px-3 sm:px-4 py-2.5 sm:py-3 transition-all cursor-pointer ${active
+      ? "border-blue-600 bg-blue-50 text-blue-900 shadow-sm"
+      : "border-transparent text-slate-700 hover:bg-green-50 hover:text-green-800 active:bg-green-100"
+      }`}
   >
     <Icon size={18} className={active ? "text-blue-700" : "text-pink-600 opacity-90 group-hover:text-green-700 flex-shrink-0"} />
     <span className="font-semibold text-xs uppercase tracking-wide text-black truncate">{label}</span>
@@ -138,27 +137,31 @@ const DashboardLayout = ({ children }) => {
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-56 flex-col border-r border-slate-200 bg-white sm:w-64 md:w-72 lg:static lg:translate-x-0 ${
-          isSidebarOpen ? "translate-x-0" : "-translate-x-full"
-        } transition-transform duration-300`}
+        className={`fixed inset-y-0 left-0 z-50 flex w-56 flex-col border-r border-slate-200 bg-white sm:w-64 md:w-72 lg:static lg:translate-x-0 ${isSidebarOpen ? "translate-x-0" : "-translate-x-full"
+          } transition-transform duration-300`}
       >
         {/* Logo — fixed top */}
         <div className="shrink-0 border-b border-slate-200 p-3 sm:p-4">
-          <div className="flex items-center gap-2 sm:gap-3 px-1">
-            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-blue-200 bg-blue-100 text-base font-bold text-blue-900 sm:h-10 sm:w-10">भा</div>
+          <Link to="/" className="flex items-center gap-2 sm:gap-3 px-1 group cursor-pointer">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-50 border border-slate-200 p-1 shadow-sm transition-transform group-hover:scale-105">
+              <img src="/logo-icon.png" alt="Smart Public Complaint" className="h-full w-full object-contain" />
+            </div>
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[9px] font-semibold uppercase tracking-wide text-green-700">Digital India</p>
-              <h1 className="truncate text-sm font-bold text-black">Complaint Portal</h1>
+              <p className="truncate text-[9px] font-bold uppercase tracking-wider text-emerald-600">Portal</p>
+              <h1 className="truncate text-xs sm:text-sm font-black text-slate-900 leading-tight">Smart Public Complaint</h1>
             </div>
             <button
               type="button"
-              onClick={() => setIsSidebarOpen(false)}
+              onClick={(e) => {
+                e.preventDefault();
+                setIsSidebarOpen(false);
+              }}
               className="rounded-lg border border-slate-200 p-2 text-slate-700 hover:bg-slate-100 lg:hidden"
               aria-label="Close navigation"
             >
               ✕
             </button>
-          </div>
+          </Link>
         </div>
 
         {/* Nav — scrollable middle only */}
@@ -199,8 +202,8 @@ const DashboardLayout = ({ children }) => {
               <Menu size={20} />
             </button>
             <div className="hidden lg:block min-w-0">
-               <h2 className="text-base sm:text-lg font-bold capitalize tracking-tight text-blue-900 truncate">{user?.role} Portal</h2>
-               <p className="text-[8px] sm:text-[10px] font-semibold uppercase tracking-wide text-green-700 truncate">Official complaint management</p>
+              <h2 className="text-base sm:text-lg font-bold capitalize tracking-tight text-blue-900 truncate">{user?.role} Portal</h2>
+              <p className="text-[8px] sm:text-[10px] font-semibold uppercase tracking-wide text-green-700 truncate">Official complaint management</p>
             </div>
           </div>
 
@@ -220,13 +223,13 @@ const DashboardLayout = ({ children }) => {
 
             <div className="mx-0.5 sm:mx-1 h-8 sm:h-10 w-px bg-slate-200"></div>
             <div className="group flex cursor-pointer items-center gap-2 sm:gap-3 pl-0.5 sm:pl-2">
-               <div className="hidden text-right sm:block min-w-0">
-                  <p className="text-xs font-black leading-none text-black truncate">{user?.name || "User"}</p>
-                  <p className="mt-1 text-[8px] font-bold uppercase tracking-widest text-green-700 truncate">Verified</p>
-               </div>
-               <div className="flex h-8 sm:h-10 w-8 sm:w-10 items-center justify-center overflow-hidden rounded-lg border border-blue-200 bg-blue-50 text-blue-800 shadow-sm transition-all group-hover:border-blue-400 group-hover:bg-blue-100 flex-shrink-0">
-                  {user?.photoURL ? <img src={user.photoURL} alt="Avatar" className="h-full w-full object-cover" /> : <User size={18} />}
-               </div>
+              <div className="hidden text-right sm:block min-w-0">
+                <p className="text-xs font-black leading-none text-black truncate">{user?.name || "User"}</p>
+                <p className="mt-1 text-[8px] font-bold uppercase tracking-widest text-green-700 truncate">Verified</p>
+              </div>
+              <div className="flex h-8 sm:h-10 w-8 sm:w-10 items-center justify-center overflow-hidden rounded-lg border border-blue-200 bg-blue-50 text-blue-800 shadow-sm transition-all group-hover:border-blue-400 group-hover:bg-blue-100 flex-shrink-0">
+                {user?.photoURL ? <img src={user.photoURL} alt="Avatar" className="h-full w-full object-cover" /> : <User size={18} />}
+              </div>
             </div>
           </div>
         </header>
