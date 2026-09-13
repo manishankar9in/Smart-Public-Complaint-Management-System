@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "react-toastify";
-import { Mail, Lock, Loader2, ArrowRight, CheckCircle2, AlertTriangle, RefreshCw } from "lucide-react";
+import { Mail, Lock, Loader2, ArrowRight, CheckCircle2, AlertTriangle, RefreshCw, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { LOGIN_ROLE_CONFIG } from "../data/roleThemes";
 import { api } from "../utils/api";
@@ -12,6 +12,7 @@ const VALID_ROLES = ["public", "worker"];
 const Login = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [mouse, setMouse] = useState({ x: 0, y: 0 });
   const [unverifiedState, setUnverifiedState] = useState(null); // { email, role }
@@ -393,14 +394,23 @@ const Login = () => {
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40" size={16} aria-hidden />
                     <input
                       id="password"
-                      type="password"
+                      type={showPassword ? "text" : "password"}
                       required
                       autoComplete="current-password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      className="login-input min-h-[42px]"
+                      className="login-input min-h-[42px] pr-11"
                       placeholder="Enter your password"
                     />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((visible) => !visible)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-white/50 transition-colors hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      title={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff size={16} aria-hidden /> : <Eye size={16} aria-hidden />}
+                    </button>
                   </div>
                 </div>
 

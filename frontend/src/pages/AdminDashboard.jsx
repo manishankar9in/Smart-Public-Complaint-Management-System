@@ -24,6 +24,7 @@ import {
   UserCheck,
   MessageSquare,
   Star,
+  Loader2,
 } from "lucide-react";
 import { Card, StatsCard, Badge } from "../components/UI";
 import PriorityBadge from "../components/PriorityBadge";
@@ -73,9 +74,10 @@ const AdminDashboard = () => {
   const [modalWorkerCity, setModalWorkerCity] = useState("");
   const [filterByCategoryOnly, setFilterByCategoryOnly] = useState(true);
 
-  // Eligible workers fetched from backend for the selected complaint
+  // Eligible workers & audit result fetched from backend for the selected complaint
   const [eligibleWorkers, setEligibleWorkers] = useState([]);
   const [eligibleLoading, setEligibleLoading] = useState(false);
+  const [assignmentAudit, setAssignmentAudit] = useState(null);
 
   useEffect(() => {
     fetchComplaints();
@@ -250,6 +252,7 @@ const AdminDashboard = () => {
       setShowAssignmentModal(false);
       setSelectedComplaint(null);
       setSelectedWorker(null);
+      setAssignmentAudit(null);
       fetchComplaints();
     } catch (err) {
       toast.error("Assignment failed: " + (err.response?.data?.detail || err.message || "Network error"));
@@ -264,15 +267,26 @@ const AdminDashboard = () => {
     setFilterByCategoryOnly(true);
     setSelectedWorker(null);
     setEligibleWorkers([]);
+    setAssignmentAudit(null);
     setShowAssignmentModal(true);
-    // Fetch eligible workers from backend (department + location + availability validated)
+    
+    // Fetch strict automated audit result from backend (State -> District -> Dept -> Avail -> GPS Distance)
     setEligibleLoading(true);
     try {
       const res = await api.get(`/admin/eligible-workers/${complaint._id}`);
-      setEligibleWorkers(res.data || []);
+      const data = res.data;
+      setAssignmentAudit(data);
+      const list = data?.eligible_workers || [];
+      setEligibleWorkers(list);
+      if (data?.nearest_worker) {
+        setSelectedWorker(data.nearest_worker);
+      } else if (list.length > 0) {
+        setSelectedWorker(list[0]);
+      }
     } catch (err) {
-      console.warn("Failed to fetch eligible workers:", err);
-      toast.warn("Could not load eligible workers. Check filters manually.");
+      console.warn("Failed to audit eligible workers:", err);
+      toast.warn("Could not audit eligible workers for this complaint.");
+      setAssignmentAudit(null);
       setEligibleWorkers([]);
     } finally {
       setEligibleLoading(false);
@@ -942,13 +956,13 @@ const AdminDashboard = () => {
                             <button type="button" onClick={() => handleVerify(c._id)} className="btn-primary cursor-pointer !px-2 !py-1 text-[9px]">Verify</button>
                           )}
                           {c.status === "VERIFIED" && (
-                            <button type="button" onClick={() => openAssignmentModal(c)} className="btn-primary cursor-pointer !px-2 !py-1 text-[9px]">Assign Worker</button>
+                            <button type="button" onClick={() => openAssignmentModal(c)} className="btn-primary cursor-pointer !px-2 !py-1 text-[9px]">Audit / Assign</button>
                           )}
                           {(c.status === "REOPENED" || c.status === "ESCALATED") && (
-                            <button type="button" onClick={() => handleVerify(c._id)} className="btn-primary cursor-pointer !px-2 !py-1 text-[9px]">Re-verify</button>
+                            <button type="button" onClick={() => openAssignmentModal(c)} className="btn-primary cursor-pointer !px-2 !py-1 text-[9px]">Audit / Reassign</button>
                           )}
                           {c.status === "WORKER_COMPLETED" && (
-                            <button type="button" onClick={() => openAuditModal(c)} className="btn-primary cursor-pointer !px-2 !py-1 text-[9px]">Audit</button>
+                            <button type="button" onClick={() => openAuditModal(c)} className="btn-primary cursor-pointer !px-2 !py-1 text-[9px]">Audit Resolution</button>
                           )}
                           <Link to={`/complaint/${c._id}`} className="btn-secondary cursor-pointer !px-2 !py-1 text-[9px]">View</Link>
                         </div>
@@ -1130,24 +1144,28 @@ const AdminDashboard = () => {
       )}
       </AnimatePresence>
 
-      {/* Worker Assignment Modal */}
+      {/* Worker Assignment & Automated Audit Modal */}
       <AnimatePresence>
       {showAssignmentModal && selectedComplaint && (
-         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-6 backdrop-blur-sm">
+         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 sm:p-6 backdrop-blur-sm">
             <motion.div 
-               initial={{ opacity: 0, y: 100 }}
-               animate={{ opacity: 1, y: 0 }}
-               exit={{ opacity: 0, y: 100 }}
-               className="max-h-[90vh] w-full max-w-4xl overflow-y-auto rounded-[32px] border border-slate-200 bg-white shadow-premium"
+               initial={{ opacity: 0, scale: 0.96, y: 30 }}
+               animate={{ opacity: 1, scale: 1, y: 0 }}
+               exit={{ opacity: 0, scale: 0.96, y: 30 }}
+               className="max-h-[92vh] w-full max-w-5xl overflow-y-auto rounded-[32px] border border-slate-200 bg-white shadow-2xl"
             >
-               <div className="p-10 space-y-8">
-                  <div className="flex justify-between items-start">
+               <div className="p-6 sm:p-10 space-y-6">
+                  {/* Modal Header */}
+                  <div className="flex justify-between items-start border-b border-slate-100 pb-5">
                      <div>
-                        <h2 className="text-3xl font-black tracking-tight text-black">Assign Worker</h2>
-
-
-                        <p className="text-[10px] text-muted font-bold tracking-[0.2em] uppercase mt-2">
-                           {selectedComplaint.category} - {selectedComplaint.address}
+                        <div className="flex items-center gap-2">
+                           <ShieldCheck className="text-blue-600" size={24} />
+                           <h2 className="text-2xl sm:text-3xl font-black tracking-tight text-black">
+                              Complaint Assignment &amp; Audit
+                           </h2>
+                        </div>
+                        <p className="text-[11px] font-bold tracking-widest uppercase text-slate-500 mt-1">
+                           Strict Routing: State → District → Department → Availability → Nearest GPS Distance
                         </p>
                      </div>
                      <button
@@ -1156,222 +1174,263 @@ const AdminDashboard = () => {
                          setShowAssignmentModal(false);
                          setSelectedComplaint(null);
                          setSelectedWorker(null);
+                         setAssignmentAudit(null);
                        }}
-                       className="w-12 h-12 rounded-2xl bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-100 transition-all"
+                       className="w-10 h-10 rounded-2xl bg-slate-100 text-slate-600 flex items-center justify-center hover:bg-red-50 hover:text-red-500 transition-all"
                      >
-                        <X size={24} />
+                        <X size={20} />
                      </button>
                   </div>
 
-                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                     {/* Complaint Details */}
-                     <div className="space-y-6">
-                        <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100">
-                           <h4 className="text-[10px] font-black uppercase tracking-widest text-muted mb-4">Complaint Details</h4>
-                           <div className="space-y-3">
-                              <div className="flex justify-between">
-                                 <span className="text-[10px] text-muted font-bold uppercase">Category:</span>
-                                 <span className="text-[10px] font-black text-secondary">{selectedComplaint.category}</span>
+                  {/* Body Content Grid */}
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                     
+                     {/* Left: Complaint Details Card (5 cols) */}
+                     <div className="lg:col-span-5 space-y-4">
+                        <div className="p-5 bg-slate-50 rounded-3xl border border-slate-200/70 space-y-4">
+                           <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+                              <span className="text-[10px] font-black uppercase tracking-wider text-slate-500">Complaint Intake</span>
+                              <span className="font-mono text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100">
+                                 #{String(selectedComplaint._id).slice(-6).toUpperCase()}
+                              </span>
+                           </div>
+
+                           <div className="space-y-3 text-xs">
+                              <div>
+                                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Category &amp; Department</p>
+                                 <p className="font-black text-slate-900 mt-0.5 text-sm">{selectedComplaint.category}</p>
+                                 <p className="text-[11px] font-semibold text-green-700 mt-0.5">
+                                    Target Dept: {selectedComplaint.department || "Municipal Operations"}
+                                 </p>
+                                 {selectedComplaint.custom_department && (
+                                    <p className="text-[10px] font-medium text-indigo-600">
+                                       Custom Spec: {selectedComplaint.custom_department}
+                                    </p>
+                                 )}
                               </div>
-                              {selectedComplaint.custom_department && (
-                                <div className="flex justify-between">
-                                  <span className="text-[10px] text-muted font-bold uppercase">Custom Dept:</span>
-                                  <span className="text-[10px] font-black text-indigo-600">{selectedComplaint.custom_department}</span>
-                                </div>
-                              )}
-                              <div className="flex justify-between">
-                                 <span className="text-[10px] text-muted font-bold uppercase">Routed Dept:</span>
-                                 <span className="text-[10px] font-black text-green-700">{selectedComplaint.department || "—"}</span>
+
+                              <div className="border-t border-slate-200 pt-2.5">
+                                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Jurisdiction / Location</p>
+                                 <p className="font-bold text-slate-800 mt-0.5">{selectedComplaint.address || "Address not provided"}</p>
+                                 <div className="flex flex-wrap gap-2 mt-2">
+                                    <span className="inline-flex items-center gap-1 rounded-md bg-white border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-700">
+                                       District: <strong className="text-black">{selectedComplaint.city || selectedComplaint.district || "—"}</strong>
+                                    </span>
+                                    <span className="inline-flex items-center gap-1 rounded-md bg-white border border-slate-200 px-2 py-1 text-[10px] font-bold text-slate-700">
+                                       State: <strong className="text-black">{selectedComplaint.state || "—"}</strong>
+                                    </span>
+                                 </div>
                               </div>
-                              <div className="flex justify-between">
-                                 <span className="text-[10px] text-muted font-bold uppercase">Priority:</span>
-                                 <span className={`text-[10px] font-black uppercase px-2 py-1 rounded ${
-                                    selectedComplaint.priority_level === 'Critical' ? 'bg-red-50 text-red-600' :
-                                    selectedComplaint.priority_level === 'High' ? 'bg-amber-50 text-amber-600' :
-                                    'bg-blue-50 text-blue-600'
-                                 }`}>{selectedComplaint.priority_level}</span>
+
+                              <div className="border-t border-slate-200 pt-2.5">
+                                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Complaint GPS Coordinates</p>
+                                 {selectedComplaint.gps_lat && selectedComplaint.gps_long ? (
+                                    <div className="mt-1 flex items-center gap-2 rounded-xl bg-green-50 border border-green-200 p-2 text-[11px] font-mono text-green-900 font-bold">
+                                       <MapPin size={14} className="text-green-600 shrink-0" />
+                                       <span>{Number(selectedComplaint.gps_lat).toFixed(6)}, {Number(selectedComplaint.gps_long).toFixed(6)}</span>
+                                    </div>
+                                 ) : (
+                                    <div className="mt-1 flex items-center gap-2 rounded-xl bg-amber-50 border border-amber-200 p-2 text-[10px] text-amber-900 font-medium">
+                                       <AlertCircle size={14} className="text-amber-600 shrink-0" />
+                                       <span>Missing GPS Coordinates</span>
+                                    </div>
+                                 )}
                               </div>
-                              <div className="flex justify-between">
-                                 <span className="text-[10px] text-muted font-bold uppercase">Location:</span>
-                                 <span className="text-[10px] font-black text-secondary text-right">{selectedComplaint.address}</span>
+
+                              <div className="border-t border-slate-200 pt-2.5">
+                                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Priority &amp; Severity</p>
+                                 <div className="mt-1 flex items-center gap-2">
+                                    <PriorityBadge priority={selectedComplaint.priority_level || "Medium"} />
+                                    <span className="text-[10px] font-bold uppercase text-slate-500">
+                                       Status: {selectedComplaint.status?.replace(/_/g, " ")}
+                                    </span>
+                                 </div>
                               </div>
-                              {selectedComplaint.gps_lat && selectedComplaint.gps_long && (
-                                <div className="pt-2">
-                                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-center">
-                                    <p className="text-[10px] font-black text-slate-700">GPS Coordinates</p>
-                                    <p className="mt-1 text-[10px] text-slate-500">{Number(selectedComplaint.gps_lat).toFixed(6)}, {Number(selectedComplaint.gps_long).toFixed(6)}</p>
-                                  </div>
-                                </div>
-                              )}
                            </div>
                         </div>
                      </div>
 
-                    {/* Worker Selection - Search and Filter */}
-                    <div className="space-y-4">
-                      <h4 className="text-[10px] font-black uppercase tracking-widest text-muted mb-2">Select Worker</h4>
-
-                      <div className="rounded-3xl border border-slate-100 bg-slate-50 p-4">
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="text-[10px] font-black uppercase tracking-widest text-muted">Eligible Workers</p>
-                            <p className="text-[9px] text-slate-500">Dept + Location + Availability validated</p>
-                          </div>
-                          <span className={`rounded-full px-3 py-1 text-[9px] font-black uppercase tracking-[0.2em] ${
-                            eligibleLoading
-                              ? 'bg-yellow-50 text-yellow-600'
-                              : eligibleWorkers.length > 0
-                              ? 'bg-green-50 text-green-700'
-                              : 'bg-red-50 text-red-600'
-                          }`}>
-                            {eligibleLoading ? 'Loading…' : `${eligibleWorkers.length} eligible`}
-                          </span>
-                        </div>
-                        {eligibleLoading ? (
-                          <p className="mt-3 text-[10px] text-slate-500 animate-pulse">Fetching eligible workers from server…</p>
-                        ) : recommendedWorkers.length === 0 ? (
-                          <p className="mt-3 text-[10px] text-slate-500">No eligible workers found for this dept + location.</p>
-                        ) : (
-                          <div className="mt-4 grid gap-3">
-                            {recommendedWorkers.map((worker) => (
-                              <button
-                                key={worker.worker_uid}
-                                type="button"
-                                onClick={() => setSelectedWorker(worker)}
-                                className={`w-full rounded-2xl border px-4 py-3 text-left transition-all ${
-                                  selectedWorker?.worker_uid === worker.worker_uid
-                                    ? 'border-blue-600 bg-blue-50'
-                                    : 'border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <div>
-                                    <p className="text-[10px] font-black text-black">{worker.name}</p>
-                                    <p className="text-[9px] text-slate-500">{worker.department || 'General Force'}</p>
-                                  </div>
-                                  <p className="text-[9px] uppercase text-slate-600">Tasks: {worker.active_tasks || 0}</p>
-                                </div>
-                                <p className="mt-2 text-[8px] uppercase tracking-[0.16em] text-slate-500">{worker.city}, {worker.state}</p>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="text-[10px] font-black uppercase text-muted mb-1 block">Filter State</label>
-                          <select
-                            value={modalWorkerState}
-                            onChange={(e) => {
-                              setModalWorkerState(e.target.value);
-                              setModalWorkerCity("");
-                            }}
-                            className="input-field w-full rounded-2xl px-4 py-2 text-xs"
-                          >
-                            <option value="">All States</option>
-                            {getAllStates().map((state) => (
-                              <option key={state} value={state}>{state}</option>
-                            ))}
-                          </select>
-                        </div>
-                        <div>
-                          <label className="text-[10px] font-black uppercase text-muted mb-1 block">Filter City/District</label>
-                          <select
-                            value={modalWorkerCity}
-                            onChange={(e) => setModalWorkerCity(e.target.value)}
-                            className="input-field w-full rounded-2xl px-4 py-2 text-xs"
-                            disabled={!modalWorkerState}
-                          >
-                            <option value="">All Cities</option>
-                            {modalWorkerState && getDistrictsForState(modalWorkerState).map((city) => (
-                              <option key={city} value={city}>{city}</option>
-                            ))}
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 py-1">
-                        <input
-                          id="filterByCategoryOnly"
-                          type="checkbox"
-                          checked={filterByCategoryOnly}
-                          onChange={(e) => setFilterByCategoryOnly(e.target.checked)}
-                          className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                        />
-                        <label htmlFor="filterByCategoryOnly" className="text-[10px] font-black uppercase text-slate-500 cursor-pointer select-none">
-                          Filter by complaint category ({selectedComplaint.category})
-                        </label>
-                      </div>
-                      
-                      <div className="relative flex items-center rounded-2xl border border-slate-200 bg-white px-4 py-2">
-                        <Search size={16} className="text-slate-500 mr-2" />
-                        <input
-                          type="text"
-                          placeholder="Search workers by name, email, duty..."
-                          className="bg-transparent text-xs font-medium tracking-wide text-black outline-none placeholder:text-slate-400 w-full"
-                          value={modalWorkerSearch}
-                          onChange={(e) => setModalWorkerSearch(e.target.value)}
-                        />
-                      </div>
-
-                      <div className="space-y-3 max-h-64 overflow-y-auto">
-                        {modalFilteredWorkers.length === 0 ? (
-                          <div className="p-6 bg-slate-50 rounded-3xl border border-slate-100 text-center">
-                            <p className="text-[10px] text-muted py-8">No workers match the selected location or search query.</p>
-                          </div>
-                        ) : (
-                          modalFilteredWorkers.map(worker => (
-                            <div 
-                              key={worker.worker_uid} 
-                              className={`p-4 bg-white rounded-2xl border transition-all cursor-pointer ${
-                                selectedWorker?.worker_uid === worker.worker_uid 
-                                  ? 'border-primary ring-2 ring-primary bg-indigo-50/10' 
-                                  : 'border-slate-100 hover:border-primary hover:bg-slate-50/50'
-                              }`}
-                              onClick={() => setSelectedWorker(worker)}
-                            >
-                              <div className="flex justify-between items-center">
-                                <div>
-                                  <div className="flex items-center gap-2">
-                                    <p className="text-[10px] font-black text-secondary">{worker.name}</p>
-                                    <span className="px-1.5 py-0.5 text-[8px] font-bold rounded bg-pink-50 text-pink-700 uppercase border border-pink-100">
-                                      {worker.department || 'General'}
-                                    </span>
-                                  </div>
-                                  <p className="text-[8px] text-blue-600 font-bold uppercase mt-1">
-                                    {worker.city}, {worker.state} {worker.ward ? `(Ward: ${worker.ward})` : ''}
-                                  </p>
-                                </div>
-                                <div className="text-right">
-                                  <p className="text-[8px] text-muted font-bold uppercase">Active Tasks</p>
-                                  <p className="text-lg font-black text-primary">{worker.active_tasks || 0}</p>
-                                </div>
+                     {/* Right: Automated Audit Verification & Eligible Worker Selection (7 cols) */}
+                     <div className="lg:col-span-7 space-y-4">
+                        
+                        {/* Audit Status Bar */}
+                        <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm space-y-3">
+                           <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                 <Activity size={18} className="text-blue-600" />
+                                 <h4 className="text-xs font-black uppercase tracking-wider text-slate-800">
+                                    Automated Assignment Audit Result
+                                 </h4>
                               </div>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                    </div>
+                              <span className={`rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-wider ${
+                                 eligibleLoading
+                                    ? 'bg-amber-100 text-amber-800'
+                                    : assignmentAudit?.audit_passed
+                                    ? 'bg-green-100 text-green-900'
+                                    : 'bg-red-100 text-red-900'
+                              }`}>
+                                 {eligibleLoading ? 'Auditing…' : assignmentAudit?.audit_passed ? 'Audit Passed' : 'Audit Failed'}
+                              </span>
+                           </div>
+
+                           {/* Audit Loading */}
+                           {eligibleLoading && (
+                              <div className="py-8 text-center space-y-2">
+                                 <Loader2 size={28} className="mx-auto animate-spin text-blue-600" />
+                                 <p className="text-xs font-bold text-slate-600">
+                                    Auditing State → District → Department → Availability → GPS Distance…
+                                 </p>
+                              </div>
+                           )}
+
+                           {/* Audit Success: Nearest Eligible Worker Found */}
+                           {!eligibleLoading && assignmentAudit?.audit_passed && selectedWorker && (
+                              <div className="space-y-4 pt-1">
+                                 <div className="rounded-2xl border-2 border-green-500 bg-green-50/40 p-4 space-y-3">
+                                    <div className="flex items-center justify-between">
+                                       <span className="inline-flex items-center gap-1 rounded-full bg-green-600 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-white shadow-sm">
+                                          <CheckCircle size={12} /> Eligible Worker Found (Nearest)
+                                       </span>
+                                       <span className="text-xs font-black text-green-900 bg-green-200/80 px-2.5 py-1 rounded-lg">
+                                          {selectedWorker.distance_km !== undefined ? `${selectedWorker.distance_km} km away` : 'Nearby'}
+                                       </span>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 gap-3 text-xs pt-1">
+                                       <div>
+                                          <p className="text-[10px] font-bold uppercase text-slate-500">Worker Name</p>
+                                          <p className="text-sm font-black text-slate-900">{selectedWorker.name}</p>
+                                          <p className="text-[10px] text-slate-500">{selectedWorker.email}</p>
+                                       </div>
+                                       <div>
+                                          <p className="text-[10px] font-bold uppercase text-slate-500">Department</p>
+                                          <span className="inline-block rounded bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-700 mt-0.5">
+                                             {selectedWorker.department || "Public Works"}
+                                          </span>
+                                       </div>
+                                       <div>
+                                          <p className="text-[10px] font-bold uppercase text-slate-500">State &amp; District</p>
+                                          <p className="font-bold text-slate-800">
+                                             {selectedWorker.district || selectedWorker.city}, {selectedWorker.state}
+                                          </p>
+                                       </div>
+                                       <div>
+                                          <p className="text-[10px] font-bold uppercase text-slate-500">Availability &amp; Workload</p>
+                                          <p className="font-bold text-green-700">
+                                             Available · {selectedWorker.active_tasks || 0} active task(s)
+                                          </p>
+                                       </div>
+                                    </div>
+
+                                    {/* GPS Coordinates Comparison */}
+                                    <div className="rounded-xl bg-white border border-green-200 p-2.5 text-[10px] font-mono grid grid-cols-1 sm:grid-cols-2 gap-2 text-slate-700">
+                                       <div>
+                                          <span className="font-bold text-slate-500">Worker GPS: </span>
+                                          {selectedWorker.latitude ? `${Number(selectedWorker.latitude).toFixed(4)}, ${Number(selectedWorker.longitude).toFixed(4)}` : "—"}
+                                       </div>
+                                       <div>
+                                          <span className="font-bold text-slate-500">Complaint GPS: </span>
+                                          {selectedComplaint.gps_lat ? `${Number(selectedComplaint.gps_lat).toFixed(4)}, ${Number(selectedComplaint.gps_long).toFixed(4)}` : "—"}
+                                       </div>
+                                    </div>
+                                 </div>
+
+                                 {/* If multiple eligible workers in the same district, show alternative candidates */}
+                                 {eligibleWorkers.length > 1 && (
+                                    <div className="space-y-2">
+                                       <p className="text-[10px] font-black uppercase tracking-wider text-slate-500">
+                                          Other Verified Workers in Same District ({eligibleWorkers.length})
+                                       </p>
+                                       <div className="grid gap-2 max-h-36 overflow-y-auto pr-1">
+                                          {eligibleWorkers.map((w) => (
+                                             <button
+                                                key={w.worker_uid || w._id}
+                                                type="button"
+                                                onClick={() => setSelectedWorker(w)}
+                                                className={`flex items-center justify-between rounded-xl border p-2.5 text-left text-xs transition-all ${
+                                                   selectedWorker?.worker_uid === (w.worker_uid || w._id)
+                                                      ? "border-blue-600 bg-blue-50/70 ring-1 ring-blue-600"
+                                                      : "border-slate-200 bg-white hover:border-slate-300"
+                                                }`}
+                                             >
+                                                <div>
+                                                   <span className="font-bold text-slate-900">{w.name}</span>
+                                                   <span className="text-[10px] text-slate-500 ml-2">({w.department})</span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                   <span className="text-[10px] font-bold text-slate-600">{w.distance_km} km</span>
+                                                   <span className="text-[9px] bg-slate-100 px-1.5 py-0.5 rounded text-slate-700">
+                                                      Tasks: {w.active_tasks || 0}
+                                                   </span>
+                                                </div>
+                                             </button>
+                                          ))}
+                                       </div>
+                                    </div>
+                                 )}
+                              </div>
+                           )}
+
+                           {/* Audit Failure: No eligible worker */}
+                           {!eligibleLoading && (!assignmentAudit?.audit_passed || eligibleWorkers.length === 0) && (
+                              <div className="rounded-2xl border border-red-200 bg-red-50/70 p-5 space-y-3">
+                                 <div className="flex items-center gap-2 text-red-900 font-bold">
+                                    <AlertCircle className="text-red-600 shrink-0" size={20} />
+                                    <span>No eligible worker found for this complaint.</span>
+                                 </div>
+                                 
+                                 <p className="text-xs text-red-800">
+                                    The complaint cannot be assigned because one or more mandatory conditions failed:
+                                 </p>
+
+                                 <ul className="space-y-1.5 text-xs text-red-700 pl-5 list-disc">
+                                    {(assignmentAudit?.failure_reasons || [
+                                       "No worker in the same district and state",
+                                       "No matching department worker available",
+                                       "Missing complaint or worker GPS coordinates"
+                                    ]).map((reason, idx) => (
+                                       <li key={idx} className="font-medium">{reason}</li>
+                                    ))}
+                                 </ul>
+
+                                 <p className="text-[11px] text-slate-600 pt-1 italic">
+                                    Assignments across different districts or unrelated departments are strictly prevented to eliminate wrong routing.
+                                 </p>
+                              </div>
+                           )}
+                        </div>
+                     </div>
                   </div>
 
-                  <div className="flex gap-4">
+                  {/* Actions Footer */}
+                  <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 border-t border-slate-100 pt-5">
                      <button 
+                       type="button"
                        onClick={() => {
                          setShowAssignmentModal(false);
                          setSelectedComplaint(null);
                          setSelectedWorker(null);
+                         setAssignmentAudit(null);
                        }}
-                       className="btn-secondary"
+                       className="btn-secondary px-6 py-2.5 text-xs font-bold"
                      >
                         Cancel
                      </button>
                      <button 
-                       onClick={() => selectedWorker && handleAssignWorker(selectedComplaint._id, selectedWorker.worker_uid)}
-                       disabled={!selectedWorker}
-                       className="btn-primary flex-1"
+                       type="button"
+                       onClick={() => selectedWorker && handleAssignWorker(selectedComplaint._id, selectedWorker.worker_uid || selectedWorker._id)}
+                       disabled={!selectedWorker || !assignmentAudit?.audit_passed || eligibleLoading}
+                       className={`btn-primary px-8 py-2.5 text-xs font-black uppercase tracking-wider ${
+                          !selectedWorker || !assignmentAudit?.audit_passed
+                             ? 'opacity-50 cursor-not-allowed !bg-slate-400'
+                             : '!bg-green-600 hover:!bg-green-700 shadow-lg shadow-green-600/20'
+                       }`}
                      >
-                        {selectedWorker ? `Assign to ${selectedWorker.name}` : 'Select a Worker'}
+                        {eligibleLoading 
+                           ? 'Auditing Worker Rules…' 
+                           : selectedWorker 
+                           ? `Confirm Assignment to ${selectedWorker.name}` 
+                           : 'Assignment Blocked (No Eligible Worker)'}
                      </button>
                   </div>
                </div>

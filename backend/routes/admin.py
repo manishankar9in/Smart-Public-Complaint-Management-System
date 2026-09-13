@@ -6,9 +6,8 @@ from routes.auth import get_admin_uid_from_token
 from models.complaint import ComplaintVerifyUpdate, WorkerAssignment, AdminSolutionUpdate
 from datetime import datetime, timedelta
 from scoring_engine.ai_priority import calculate_priority_score
-from services.worker_routing import find_best_worker
-from services.category_mapping import duty_matches_category
-from services.worker_routing import _location_matches
+from services.worker_routing import find_best_worker, audit_workers_for_complaint, _norm, _location_matches
+from services.category_mapping import duty_matches_category, department_matches_category
 from services.notifications import create_notification
 from services.worker_stats import increment_worker_solved, decrement_worker_solved
 from services.email_service import (
@@ -122,7 +121,12 @@ async def verify_complaint(complaint_id: str, update: ComplaintVerifyUpdate):
 @router.put("/assign-worker/{complaint_id}")
 async def assign_worker(complaint_id: str, payload: dict = None):
     """Admin manually assigns ONE eligible worker to a complaint.
-    Worker must: exist, be available=True, match department, and match location.
+    Worker must pass all 5 strict checks:
+    1. State Match
+    2. District Match
+    3. Department Match
+    4. Availability (available=True)
+    5. Valid Location / GPS
     """
     db = await get_database()
     
@@ -130,14 +134,14 @@ async def assign_worker(complaint_id: str, payload: dict = None):
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
 
-    # Require explicit worker_uid — no silent auto-routing from this endpoint
+    # Require explicit worker_uid
     if not payload or not payload.get("worker_uid"):
         raise HTTPException(
             status_code=400,
             detail="worker_uid is required. Admin must select an eligible worker.",
         )
 
-    worker_uid = payload["worker_uid"]
+    worker_uid = str(payload["worker_uid"])
 
     # Resolve the worker document by _id (primary) or legacy worker_uid field
     worker_doc = None
@@ -150,15 +154,25 @@ async def assign_worker(complaint_id: str, payload: dict = None):
     if not worker_doc:
         raise HTTPException(status_code=404, detail="Worker not found.")
 
-    # ── Validation 1: Worker must be available ──
-    if worker_doc.get("available") is False:
+    # ── Check 1: State Match ──
+    c_state = _norm(complaint.get("state"))
+    w_state = _norm(worker_doc.get("state"))
+    if c_state and w_state and c_state != w_state:
         raise HTTPException(
             status_code=400,
-            detail=f"Worker '{worker_doc.get('name')}' is currently unavailable / off-duty."
+            detail=f"State mismatch: Complaint is in '{complaint.get('state')}' but worker is in '{worker_doc.get('state')}'. Worker must be from the same state.",
         )
 
-    # ── Validation 2: Department must match complaint ──
-    from services.category_mapping import department_matches_category
+    # ── Check 2: District Match ──
+    c_dist = _norm(complaint.get("city") or complaint.get("district"))
+    w_dist = _norm(worker_doc.get("city") or worker_doc.get("district"))
+    if c_dist and w_dist and c_dist != w_dist:
+        raise HTTPException(
+            status_code=400,
+            detail=f"District mismatch: Complaint is in District '{complaint.get('city') or complaint.get('district')}' but worker is assigned to District '{worker_doc.get('city') or worker_doc.get('district')}'. Worker must be in the same district.",
+        )
+
+    # ── Check 3: Department Match ──
     category = complaint.get("category", "")
     custom_dept = complaint.get("custom_department")
     description = complaint.get("description", "")
@@ -167,21 +181,16 @@ async def assign_worker(complaint_id: str, payload: dict = None):
         raise HTTPException(
             status_code=400,
             detail=(
-                f"Worker department '{worker_dept}' does not match complaint department "
-                f"'{complaint.get('department', 'Unknown')}' (category: {category})."
-            )
+                f"Department mismatch: Worker department '{worker_dept}' does not match complaint department "
+                f"'{complaint.get('department', 'Unknown')}' for category '{category}'."
+            ),
         )
 
-    # ── Validation 3: Location proximity ──
-    if not _location_matches(worker_doc, complaint):
+    # ── Check 4: Worker Availability ──
+    if worker_doc.get("available") is False:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"Worker '{worker_doc.get('name')}' is located in "
-                f"{worker_doc.get('city', '?')}, {worker_doc.get('state', '?')} "
-                f"which does not match complaint location {complaint.get('city', '?')}, "
-                f"{complaint.get('state', '?')}."
-            )
+            detail=f"Worker '{worker_doc.get('name')}' is currently marked unavailable / off-duty.",
         )
 
     # The assigned uid stored in the complaint should be str(_id)
@@ -266,48 +275,23 @@ async def assign_worker(complaint_id: str, payload: dict = None):
 
 @router.get("/eligible-workers/{complaint_id}")
 async def get_eligible_workers(complaint_id: str):
-    """Return workers eligible for a specific complaint.
-    Filters by: department match (with custom_department support),
-    location match, and availability=True.
-    Sorted by active task count (least busy first).
+    """
+    Automated Audit endpoint:
+    Checks State -> District -> Department -> Availability -> Nearest GPS Distance.
+    Returns structured audit diagnostics and list of eligible workers sorted by GPS distance.
     """
     db = await get_database()
     complaint = await db.complaints.find_one({"_id": ObjectId(complaint_id)})
     if not complaint:
         raise HTTPException(status_code=404, detail="Complaint not found")
 
-    from services.category_mapping import department_matches_category
-    category = complaint.get("category", "")
-    custom_dept = complaint.get("custom_department")
-    description = complaint.get("description", "")
-
     cursor = db.workers.find({})
     all_workers = await cursor.to_list(length=500)
 
-    eligible = []
-    for w in all_workers:
-        # Must be available
-        if w.get("available") is False:
-            continue
-        # Department must match
-        if not department_matches_category(w.get("department", ""), category, custom_dept, description):
-            continue
-        # Location must match
-        if not _location_matches(w, complaint):
-            continue
-
-        active_count = await db.complaints.count_documents({
-            "worker_uid": str(w["_id"]),
-            "status": {"$in": ["ASSIGNED_TO_WORKER", "IN_PROGRESS", "REOPENED"]},
-        })
-        w["active_tasks"] = active_count
-        w["worker_uid"] = str(w["_id"])
-        eligible.append(w)
-
-    # Sort by fewest active tasks
-    eligible.sort(key=lambda w: w["active_tasks"])
-
-    return [mongo_to_jsonable(w) for w in eligible]
+    audit_result = await audit_workers_for_complaint(complaint, all_workers)
+    
+    # Return serializable JSON
+    return mongo_to_jsonable(audit_result)
 
 @router.put("/verify-solution/{complaint_id}")
 async def verify_solution(

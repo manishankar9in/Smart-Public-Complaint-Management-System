@@ -538,6 +538,66 @@ async def get_user_profile(firebase_uid: str):
         raise HTTPException(status_code=500, detail=f"Failed to fetch user: {str(e)}")
 
 
+class VerifyResetEmailRequest(BaseModel):
+    email: EmailStr
+    role: str  # "public" or "worker"
+
+
+@router.post("/verify-reset-email")
+async def verify_reset_email(body: VerifyResetEmailRequest):
+    """
+    Validates that an email belongs to the correct role before a Firebase
+    password-reset email is sent from the frontend.
+    Returns 200 OK if valid.
+    Returns 400 if the email belongs to a different role.
+    Returns 404 if the email is not registered at all.
+    """
+    db = await get_database()
+    email_norm = body.email.strip().lower()
+    role = body.role.strip().lower()
+
+    if role == "public":
+        # Email must be in users collection, not workers
+        in_users = await db.users.find_one({"email": email_norm})
+        in_workers = await db.workers.find_one({"email": email_norm})
+        if in_workers:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "This email is registered as a Field Worker account. "
+                    "Please use the Worker Forgot Password portal to reset your password."
+                ),
+            )
+        if not in_users:
+            raise HTTPException(
+                status_code=404,
+                detail="No Citizen account found with this email address. Please check the email or register.",
+            )
+        return {"status": "ok", "message": "Citizen email verified. Proceeding to send reset link."}
+
+    elif role == "worker":
+        # Email must be in workers collection, not users
+        in_workers = await db.workers.find_one({"email": email_norm})
+        in_users = await db.users.find_one({"email": email_norm})
+        if in_users:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "This email is registered as a Citizen account. "
+                    "Please use the Citizen Forgot Password portal to reset your password."
+                ),
+            )
+        if not in_workers:
+            raise HTTPException(
+                status_code=404,
+                detail="No Worker account found with this email address. Please check the email or contact your administrator.",
+            )
+        return {"status": "ok", "message": "Worker email verified. Proceeding to send reset link."}
+
+    else:
+        raise HTTPException(status_code=400, detail="Invalid role. Must be 'public' or 'worker'.")
+
+
 def _verification_html(title: str, message: str, success: bool, login_url: str = "") -> str:
     color = "#16a34a" if success else "#dc2626"
     btn = f'<a href="{login_url}" style="background:#16a34a;color:#fff;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold;display:inline-block;margin-top:20px;">Go to Login →</a>' if login_url else ""

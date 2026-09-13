@@ -1,7 +1,7 @@
 """
 Brevo SMTP Email Service for Smart Public Complaint Management System.
 Handles transactional emails with STARTTLS, structured logging, safe error diagnostics,
-and email notification tracking.
+email notification tracking, and Indian Standard Time (IST, UTC+5:30) date formatting.
 """
 
 import asyncio
@@ -11,7 +11,7 @@ import smtplib
 import socket
 import urllib.error
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from email.header import Header
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -21,6 +21,27 @@ from typing import Any, Dict, Optional
 from config import settings
 
 logger = logging.getLogger("email_service")
+
+# Indian Standard Time (IST) offset: UTC + 5 hours 30 minutes
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def get_ist_now() -> datetime:
+    """Return current datetime in Indian Standard Time (IST)."""
+    return datetime.now(timezone.utc).astimezone(IST)
+
+
+def format_ist_datetime(dt: Optional[datetime] = None, fmt: str = "%d-%m-%Y %I:%M %p IST") -> str:
+    """
+    Format a datetime object to Indian Standard Time (IST).
+    Handles naive UTC datetimes safely.
+    """
+    if dt is None:
+        dt = datetime.now(timezone.utc)
+    elif dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    ist_dt = dt.astimezone(IST)
+    return ist_dt.strftime(fmt)
 
 
 def brevo_api_configured() -> bool:
@@ -52,6 +73,7 @@ def get_email_health() -> Dict[str, Any]:
         "sender_configured": bool(settings.effective_from_email),
         "sender_name": settings.SMTP_FROM_NAME,
         "from_email": settings.effective_from_email if configured else "",
+        "server_time_ist": format_ist_datetime(),
     }
 
 
@@ -79,6 +101,7 @@ def _record_email_log(
                     "status": status,
                     "error": error,
                     "created_at": datetime.utcnow(),
+                    "timestamp_ist": format_ist_datetime(),
                 })
         except Exception as exc:
             logger.debug(f"[EMAIL] Could not write email log to MongoDB: {exc}")
@@ -207,7 +230,8 @@ def send_email(
     msg["From"] = formataddr((str(Header(from_name, "utf-8")), from_email))
     msg["Reply-To"] = settings.SMTP_FROM_EMAIL or from_email
     msg["To"] = to_email
-    msg["Date"] = datetime.utcnow().strftime("%a, %d %b %Y %H:%M:%S +0000")
+    # Set Date in Indian Standard Time (IST / +0530)
+    msg["Date"] = get_ist_now().strftime("%a, %d %b %Y %H:%M:%S +0530")
     msg["X-Mailer"] = "SmartGov Automated System"
     msg["Auto-Submitted"] = "auto-generated"
 
@@ -217,6 +241,7 @@ def send_email(
 
     logger.info(f"[EMAIL] Connecting to SMTP ({host}:{port}) to send to {to_email}...")
 
+    server = None
     try:
         server = smtplib.SMTP(host, port, timeout=20)
         server.ehlo()
@@ -433,7 +458,7 @@ def _get_base_html_template(
         <!-- Footer -->
         <div style="background:#f1f5f9;padding:16px 24px;border-top:1px solid #e2e8f0;text-align:center;">
           <p style="margin:0;font-size:11px;color:#94a3b8;">
-            © Smart Public Complaint Management System. Automated official notification.
+            © Smart Public Complaint Management System. Automated official notification (IST).
           </p>
         </div>
 
@@ -456,7 +481,7 @@ def send_complaint_submitted_email(
     created_at: Optional[datetime] = None,
     address: Optional[str] = None,
 ) -> Dict[str, Any]:
-    date_str = (created_at or datetime.utcnow()).strftime("%b %d, %Y - %I:%M %p UTC")
+    date_str = format_ist_datetime(created_at, "%d-%m-%Y %I:%M %p IST")
     subject = f"Complaint Submitted Successfully - {complaint_id}"
     
     details = {
@@ -465,7 +490,7 @@ def send_complaint_submitted_email(
         "Department": department,
         "Priority Level": f"<span style='font-weight:bold;color:#b45309;'>{priority}</span>",
         "Current Status": f"<span style='background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px;font-weight:bold;'>{status}</span>",
-        "Submitted Date": date_str,
+        "Submitted Date (IST)": date_str,
         "Location / Address": address or "Recorded via GPS",
     }
     
@@ -516,6 +541,7 @@ def send_worker_assigned_email(
     worker_name: str = "Field Technician",
     status: str = "Assigned",
 ) -> Dict[str, Any]:
+    date_str = format_ist_datetime(None, "%d-%m-%Y %I:%M %p IST")
     subject = f"Worker Assigned - {complaint_id}"
     details = {
         "Complaint ID": complaint_id,
@@ -523,6 +549,7 @@ def send_worker_assigned_email(
         "Department": department,
         "Assigned Field Worker": worker_name,
         "Current Status": status,
+        "Assigned Date (IST)": date_str,
     }
     text_body = (
         f"Hello {citizen_name},\n\n"
@@ -530,7 +557,8 @@ def send_worker_assigned_email(
         f"Assigned Worker: {worker_name}\n"
         f"Department: {department}\n"
         f"Category: {category}\n"
-        f"Status: {status}\n\n"
+        f"Status: {status}\n"
+        f"Assigned At: {date_str}\n\n"
         f"Track progress: {settings.FRONTEND_URL}/complaint/{complaint_id}\n\n"
         "— Smart Public Complaint System"
     )
@@ -567,6 +595,7 @@ def send_worker_new_assignment_email(
     description: str,
     required_action: str = "Inspect site, commence work, and upload GPS photographic resolution proof.",
 ) -> Dict[str, Any]:
+    date_str = format_ist_datetime(None, "%d-%m-%Y %I:%M %p IST")
     subject = f"New Complaint Assigned - {complaint_id}"
     details = {
         "Complaint ID": complaint_id,
@@ -574,6 +603,7 @@ def send_worker_new_assignment_email(
         "Department": department,
         "Priority": priority,
         "Location": location,
+        "Assigned Date (IST)": date_str,
         "Description Summary": description,
         "Required Action": required_action,
     }
@@ -583,6 +613,7 @@ def send_worker_new_assignment_email(
         f"Category: {category}\n"
         f"Priority: {priority}\n"
         f"Location: {location}\n"
+        f"Date: {date_str}\n"
         f"Description: {description}\n"
         f"Required Action: {required_action}\n\n"
         f"Please log in to your Worker Portal to accept and update this mission:\n"
@@ -619,6 +650,7 @@ def send_work_started_email(
     department: str,
     worker_name: Optional[str] = None,
 ) -> Dict[str, Any]:
+    date_str = format_ist_datetime(None, "%d-%m-%Y %I:%M %p IST")
     subject = f"Work Started - {complaint_id}"
     details = {
         "Complaint ID": complaint_id,
@@ -626,12 +658,14 @@ def send_work_started_email(
         "Category": category,
         "Department": department,
         "Assigned Worker": worker_name or "Municipal Field Team",
+        "Started At (IST)": date_str,
     }
     text_body = (
         f"Hello {citizen_name},\n\n"
         f"Work has started on your complaint #{complaint_id}.\n"
         f"Status: In Progress\n"
-        f"Department: {department}\n\n"
+        f"Department: {department}\n"
+        f"Started At: {date_str}\n\n"
         f"Track live updates: {settings.FRONTEND_URL}/complaint/{complaint_id}\n\n"
         "— Smart Public Complaint System"
     )
@@ -666,19 +700,22 @@ def send_worker_marked_resolved_email(
     resolution_status: str = "WORKER_COMPLETED",
     resolution_proof_info: Optional[str] = None,
 ) -> Dict[str, Any]:
+    date_str = format_ist_datetime(None, "%d-%m-%Y %I:%M %p IST")
     subject = f"Complaint Requires Verification - {complaint_id}"
     details = {
         "Complaint ID": complaint_id,
         "Field Worker": worker_name,
         "Department": department,
         "Resolution Status": resolution_status,
+        "Completed At (IST)": date_str,
         "Proof Information": resolution_proof_info or "GPS Photo proof uploaded by worker.",
     }
     text_body = (
         f"Hello {admin_name},\n\n"
         f"Worker {worker_name} has completed work on complaint #{complaint_id}.\n"
         f"Department: {department}\n"
-        f"Status: {resolution_status}\n\n"
+        f"Status: {resolution_status}\n"
+        f"Timestamp: {date_str}\n\n"
         f"Please verify resolution in Admin Portal: {settings.FRONTEND_URL}/admin-dashboard\n\n"
         "— Smart Public Complaint System"
     )
@@ -712,20 +749,20 @@ def send_admin_verified_email(
     department: str,
     verified_date: Optional[datetime] = None,
 ) -> Dict[str, Any]:
-    date_str = (verified_date or datetime.utcnow()).strftime("%b %d, %Y")
+    date_str = format_ist_datetime(verified_date, "%d-%m-%Y %I:%M %p IST")
     subject = f"Complaint Resolved - {complaint_id}"
     details = {
         "Complaint ID": complaint_id,
         "Category": category,
         "Department": department,
         "Final Status": "Resolved & Verified",
-        "Verification Date": date_str,
+        "Verification Date (IST)": date_str,
     }
     text_body = (
         f"Hello {citizen_name},\n\n"
         f"Your complaint #{complaint_id} regarding {category} has been successfully resolved and verified by the administration.\n"
         f"Status: RESOLVED\n"
-        f"Date: {date_str}\n\n"
+        f"Date (IST): {date_str}\n\n"
         f"Please visit your dashboard to rate the service: {settings.FRONTEND_URL}/complaint/{complaint_id}\n\n"
         "— Smart Public Complaint System"
     )
@@ -758,17 +795,20 @@ def send_admin_rejected_email(
     rejection_reason: str,
     required_next_action: str = "Re-inspect location, correct outstanding issues, and resubmit proof.",
 ) -> Dict[str, Any]:
+    date_str = format_ist_datetime(None, "%d-%m-%Y %I:%M %p IST")
     subject = f"Resolution Rejected - {complaint_id}"
     details = {
         "Complaint ID": complaint_id,
         "Status": "Reopened / Work Rejected",
         "Rejection Reason": rejection_reason or "Proof inadequate or issue unresolved.",
+        "Audited At (IST)": date_str,
         "Next Action Required": required_next_action,
     }
     text_body = (
         f"Hello {worker_name},\n\n"
         f"Your resolution submission for complaint #{complaint_id} was rejected by administration.\n"
         f"Reason: {rejection_reason}\n"
+        f"Timestamp: {date_str}\n"
         f"Required Action: {required_next_action}\n\n"
         f"Please check your Worker Portal: {settings.FRONTEND_URL}/worker-dashboard\n\n"
         "— Smart Public Complaint System"
@@ -804,17 +844,20 @@ def send_complaint_notification_email(
     message: str = "",
 ) -> bool:
     """Backward-compatible helper used across existing notification endpoints."""
+    date_str = format_ist_datetime(None, "%d-%m-%Y %I:%M %p IST")
     subject = f"SmartGov Update: Complaint #{complaint_id[:8] if len(complaint_id) > 8 else complaint_id} [{status}]"
     details = {
         "Complaint ID": complaint_id,
         "Category": category,
         "Status": status,
+        "Updated At (IST)": date_str,
         "Message": message or "Status updated in system.",
     }
     text_body = (
         f"Hello {name},\n\n"
         f"Your complaint #{complaint_id} regarding {category} has been updated.\n"
         f"Status: {status}\n"
+        f"Date: {date_str}\n"
         f"Details: {message}\n\n"
         f"Track online: {settings.FRONTEND_URL}\n\n"
         "— SmartGov Team"
@@ -842,10 +885,11 @@ def send_complaint_notification_email(
 
 # WORKER PASSWORD RESET EMAIL
 def send_worker_password_reset_email(*, to_email: str, name: str, reset_link: str) -> bool:
+    date_str = format_ist_datetime(None, "%d-%m-%Y %I:%M %p IST")
     subject = "SmartGov — Reset Your Worker Password"
     text_body = (
         f"Hello {name},\n\n"
-        f"We received a request to reset your worker account password.\n\n"
+        f"We received a request to reset your worker account password on {date_str}.\n\n"
         f"Click the link below to set a new password (valid for 1 hour):\n{reset_link}\n\n"
         "If you did not request this, you can safely ignore this email.\n\n"
         "— SmartGov Team"
@@ -854,7 +898,7 @@ def send_worker_password_reset_email(*, to_email: str, name: str, reset_link: st
     <div style="font-family:Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;border:1px solid #e2e8f0;border-radius:12px;background:#ffffff;">
       <h2 style="color:#1e3a8a;margin-top:0;">SmartGov Worker Portal</h2>
       <p>Hello <strong>{name}</strong>,</p>
-      <p>We received a request to reset your worker account password.</p>
+      <p>We received a request to reset your worker account password on <strong>{date_str}</strong>.</p>
       <p style="margin:28px 0;text-align:center;">
         <a href="{reset_link}"
            style="background:#d97706;color:#ffffff;padding:12px 24px;border-radius:8px;
@@ -879,11 +923,12 @@ def send_worker_password_reset_email(*, to_email: str, name: str, reset_link: st
 
 # TEST EMAIL
 def send_test_email(to_email: str) -> Dict[str, Any]:
+    date_str = format_ist_datetime(None, "%d-%m-%Y %I:%M:%S %p IST")
     subject = "Smart Public Complaint System - Brevo Test"
     text_body = (
         "Hello,\n\n"
         "This is a test email from the Smart Public Complaint System.\n"
-        "Brevo SMTP integration is working correctly.\n\n"
+        f"Brevo SMTP integration is working correctly. Timestamp (IST): {date_str}\n\n"
         "— Smart Public Complaint System"
     )
     html_body = _get_base_html_template(
@@ -896,7 +941,7 @@ def send_test_email(to_email: str) -> Dict[str, Any]:
             "SMTP Host": settings.SMTP_HOST,
             "SMTP Port": str(settings.SMTP_PORT),
             "Sender Email": settings.effective_from_email,
-            "Timestamp": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "Timestamp (IST)": date_str,
         },
         action_button_text="Visit System Portal",
         action_button_url=settings.FRONTEND_URL,
@@ -913,10 +958,11 @@ def send_test_email(to_email: str) -> Dict[str, Any]:
 # WORKER EMAIL VERIFICATION
 def send_worker_verification_email(*, to_email: str, name: str, verify_link: str) -> bool:
     """Send a styled email verification link to a newly registered worker."""
+    date_str = format_ist_datetime(None, "%d-%m-%Y %I:%M %p IST")
     subject = "SmartGov — Verify Your Worker Account Email"
     text_body = (
         f"Hello {name},\n\n"
-        f"Thank you for registering as a Field Worker on SmartGov!\n\n"
+        f"Thank you for registering as a Field Worker on SmartGov on {date_str}!\n\n"
         f"Please verify your email address by clicking the link below (valid for 24 hours):\n"
         f"{verify_link}\n\n"
         f"If you did not register for a SmartGov Worker account, please ignore this email.\n\n"
@@ -948,7 +994,7 @@ def send_worker_verification_email(*, to_email: str, name: str, verify_link: str
 
         <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:14px 18px;margin-bottom:24px;">
           <p style="margin:0;font-size:13px;color:#92400e;">
-            ⏰ This link is valid for <strong>24 hours</strong>. If it expires, use "Forgot Password" on the Worker Login page to receive a new link.
+            ⏰ Sent: <strong>{date_str}</strong>. This link is valid for <strong>24 hours</strong>. If it expires, use "Forgot Password" on the Worker Login page to receive a new link.
           </p>
         </div>
 
@@ -988,10 +1034,11 @@ def send_worker_verification_email(*, to_email: str, name: str, verify_link: str
 # CITIZEN / PUBLIC USER EMAIL VERIFICATION
 def send_citizen_verification_email(*, to_email: str, name: str, verify_link: str) -> bool:
     """Send a styled email verification link to a newly registered citizen user."""
+    date_str = format_ist_datetime(None, "%d-%m-%Y %I:%M %p IST")
     subject = "SmartGov — Verify Your Account Email"
     text_body = (
         f"Hello {name},\n\n"
-        f"Thank you for registering on SmartGov!\n\n"
+        f"Thank you for registering on SmartGov on {date_str}!\n\n"
         f"Please verify your email address by clicking the link below (valid for 24 hours):\n"
         f"{verify_link}\n\n"
         f"If you did not register for a SmartGov account, please ignore this email.\n\n"
@@ -1023,7 +1070,7 @@ def send_citizen_verification_email(*, to_email: str, name: str, verify_link: st
 
         <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:14px 18px;margin-bottom:24px;">
           <p style="margin:0;font-size:13px;color:#166534;">
-            ⏰ This link is valid for <strong>24 hours</strong>. If it expires, please register again or contact support.
+            ⏰ Sent: <strong>{date_str}</strong>. This link is valid for <strong>24 hours</strong>. If it expires, please register again or contact support.
           </p>
         </div>
 
@@ -1058,4 +1105,3 @@ def send_citizen_verification_email(*, to_email: str, name: str, verify_link: st
         event="citizen_email_verification",
     )
     return res.get("success", False)
-

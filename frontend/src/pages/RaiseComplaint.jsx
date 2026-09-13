@@ -4,17 +4,45 @@ import { COMPLAINT_CATEGORIES } from "../data/categoryMapping";
 import { useAuth } from "../context/AuthContext";
 import { INDIAN_STATES_WITH_DISTRICTS, getDistrictsForState } from "../data/indianStatesDistricts";
 import { reverseGeocode } from "../utils/mapErrorHandler";
-import { ArrowRight, CheckCircle, Loader2, MapPin } from "lucide-react";
+import { ArrowRight, CheckCircle, Loader2, MapPin, AlertTriangle } from "lucide-react";
 import GPSCamera from "../components/GPSCamera";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "react-toastify";
 import { useNavigate } from "react-router-dom";
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/**
+ * Normalise a place name for loose comparison:
+ * lower-case, trim, remove punctuation, collapse spaces.
+ */
+function normalise(str) {
+  return String(str || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Return true when the two district/state strings are "close enough" to pass.
+ * Accepts an exact match OR one string being a sub-word of the other.
+ */
+function locationsMatch(a, b) {
+  const na = normalise(a);
+  const nb = normalise(b);
+  if (!na || !nb) return true; // can't determine — allow
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function RaiseComplaint() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [locationError, setLocationError] = useState(""); // GPS photo vs form mismatch
   const [form, setForm] = useState({
     category: "",
     custom_department: "",
@@ -118,9 +146,102 @@ export default function RaiseComplaint() {
     );
   };
 
+  /**
+   * Called by GPSCamera when a photo is captured.
+   * Validates that the photo's GPS coordinates match the complaint's selected
+   * state/district.  If there is a mismatch the image is rejected and the user
+   * must re-capture at the actual complaint location.
+   */
+  const handlePhotoCapture = async ({ image, coords }) => {
+    if (!coords) {
+      toast.error("Could not read GPS from photo. Please try again.");
+      return;
+    }
+
+    setLocationError(""); // reset previous error
+
+    let photoState = "";
+    let photoDistrict = "";
+
+    try {
+      const geo = await reverseGeocode(coords.lat, coords.lng);
+      if (geo) {
+        const addr = geo.rawAddress || {};
+        const stateName = String(geo.state || addr.state || "").trim();
+        const matchedState = Object.keys(INDIAN_STATES_WITH_DISTRICTS).find(
+          (s) => s.toLowerCase() === stateName.toLowerCase()
+        ) || stateName;
+
+        const districtName = String(
+          addr.state_district || addr.county || addr.district || addr.city || addr.town || ""
+        ).trim();
+        let matchedDistrict = "";
+        if (matchedState) {
+          const districts = getDistrictsForState(matchedState) || [];
+          matchedDistrict =
+            districts.find((d) => d.toLowerCase() === districtName.toLowerCase()) ||
+            districts.find(
+              (d) =>
+                districtName.toLowerCase().includes(d.toLowerCase()) ||
+                d.toLowerCase().includes(districtName.toLowerCase())
+            ) ||
+            districtName;
+        }
+        photoState = matchedState;
+        photoDistrict = matchedDistrict;
+      }
+    } catch (err) {
+      console.error("Photo reverse geocoding error:", err);
+      // If geocoding fails completely we cannot validate — allow but warn
+      toast.warn("Could not verify photo GPS location. Ensure you are at the complaint site.");
+      setForm((prev) => ({
+        ...prev,
+        proof_image_url: image,
+        gps_lat: coords.lat,
+        gps_long: coords.lng,
+      }));
+      return;
+    }
+
+    // ── Location consistency check ──────────────────────────────────────────
+    const stateMatch = locationsMatch(form.state, photoState);
+    const districtMatch = locationsMatch(form.city, photoDistrict);
+
+    if (!stateMatch || !districtMatch) {
+      const errMsg =
+        `Photo GPS location (${photoDistrict || "unknown"}, ${photoState || "unknown"}) ` +
+        `does not match your selected complaint location ` +
+        `(${form.city}, ${form.state}). ` +
+        `Please capture the photo at the actual complaint location.`;
+
+      setLocationError(errMsg);
+      toast.error(errMsg, { autoClose: 8000 });
+
+      // Clear any previously accepted photo — force re-capture
+      setForm((prev) => ({
+        ...prev,
+        proof_image_url: "",
+        gps_lat: null,
+        gps_long: null,
+      }));
+      return;
+    }
+
+    // ── Location OK — accept photo ──────────────────────────────────────────
+    setForm((prev) => ({
+      ...prev,
+      proof_image_url: image,
+      gps_lat: coords.lat,
+      gps_long: coords.lng,
+    }));
+  };
+
   const handleSubmit = async () => {
     if (!form.gps_lat || !form.gps_long || !form.proof_image_url) {
       return toast.warn("Capture a GPS photo before submitting.");
+    }
+    if (locationError) {
+      return toast.error("Cannot submit: photo GPS location does not match selected complaint area.");
     }
     setLoading(true);
     try {
@@ -148,14 +269,13 @@ export default function RaiseComplaint() {
       }
       setStep(3);
     } catch (err) {
-      console.error('Complaint submission error:', err);
+      console.error("Complaint submission error:", err);
       
-      // Detailed error messages for debugging
       let errorMessage = "Failed to submit complaint.";
       
       if (err.response?.status === 409) {
         errorMessage = "This complaint appears to be a duplicate. A similar complaint already exists.";
-      } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout')) {
+      } else if (err.code === "ECONNABORTED" || err.message?.includes("timeout")) {
         errorMessage = "Network timeout: Image too large or connection slow. Try with better network or smaller image.";
       } else if (!err.response) {
         errorMessage = "Network Error: Cannot reach server. Check your internet connection.";
@@ -166,9 +286,10 @@ export default function RaiseComplaint() {
       } else if (err.response?.status === 500) {
         errorMessage = "Server Error: Backend issue. Try again later.";
       } else if (err.response?.data?.detail) {
-        errorMessage = typeof err.response.data.detail === 'string' 
-          ? err.response.data.detail 
-          : JSON.stringify(err.response.data.detail);
+        errorMessage =
+          typeof err.response.data.detail === "string"
+            ? err.response.data.detail
+            : JSON.stringify(err.response.data.detail);
       } else if (err.message) {
         errorMessage = err.message;
       }
@@ -307,7 +428,7 @@ export default function RaiseComplaint() {
                 <button
                   type="button"
                   disabled={!canContinue}
-                  onClick={() => setStep(2)}
+                  onClick={() => { setLocationError(""); setStep(2); }}
                   className="btn-primary w-full cursor-pointer py-2.5 text-sm disabled:opacity-50"
                 >
                   Next: GPS Photo <ArrowRight size={16} />
@@ -322,63 +443,35 @@ export default function RaiseComplaint() {
                 <p className="text-xs text-slate-600">
                   <strong>{form.category}</strong> — {form.village}, {form.city}
                 </p>
+
+                {/* ── GPS location consistency notice ── */}
+                <div className="rounded-xl border border-amber-400/30 bg-amber-50 px-3 py-2.5 flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 shrink-0 text-amber-600" size={15} />
+                  <p className="text-[11px] font-semibold leading-snug text-amber-800">
+                    Your photo must be captured at the <strong>actual complaint location</strong>: {form.city}, {form.state}. Photos taken elsewhere will be rejected.
+                  </p>
+                </div>
+
+                {/* ── Location mismatch error ── */}
+                {locationError && (
+                  <div className="rounded-xl border border-red-500/30 bg-red-50 px-3 py-2.5 flex items-start gap-2">
+                    <AlertTriangle className="mt-0.5 shrink-0 text-red-600" size={15} />
+                    <p className="text-[11px] font-semibold leading-snug text-red-700">{locationError}</p>
+                  </div>
+                )}
+
                 <GPSCamera
                   label="Capture complaint photo with GPS lock (required)"
-                  onCapture={async ({ image, coords }) => {
-                    if (!coords) return;
-                    
-                    let geocodedAddress = null;
-                    try {
-                      geocodedAddress = await reverseGeocode(coords.lat, coords.lng);
-                    } catch (err) {
-                      console.error("Reverse geocoding error:", err);
-                    }
-
-                    setForm((prev) => {
-                      const updated = {
-                        ...prev,
-                        proof_image_url: image,
-                        gps_lat: coords.lat,
-                        gps_long: coords.lng,
-                      };
-
-                      if (geocodedAddress) {
-                        const addr = geocodedAddress.rawAddress || {};
-                        const stateName = String(geocodedAddress.state || addr.state || "").trim();
-                        
-                        const matchedState = Object.keys(INDIAN_STATES_WITH_DISTRICTS).find(
-                          (s) => s.toLowerCase() === stateName.toLowerCase()
-                        ) || stateName;
-                        
-                        const districtName = String(addr.state_district || addr.county || addr.district || addr.city || addr.town || "").trim();
-                        let matchedDistrict = "";
-                        if (matchedState) {
-                          const districts = getDistrictsForState(matchedState) || [];
-                          matchedDistrict = districts.find(
-                            (d) => d.toLowerCase() === districtName.toLowerCase()
-                          ) || districts.find(
-                            (d) => districtName.toLowerCase().includes(d.toLowerCase()) || d.toLowerCase().includes(districtName.toLowerCase())
-                          ) || districtName;
-                        }
-
-                        const localArea = addr.suburb || addr.village || addr.neighbourhood || addr.road || addr.town || addr.city || "";
-
-                        updated.state = matchedState;
-                        updated.city = matchedDistrict;
-                        updated.village = localArea || geocodedAddress.address || "";
-                        updated.pincode = geocodedAddress.postcode || "";
-                      }
-                      return updated;
-                    });
-                  }}
+                  onCapture={handlePhotoCapture}
                 />
+
                 <div className="flex gap-2">
                   <button type="button" onClick={() => setStep(1)} className="btn-secondary flex-1 cursor-pointer py-2 text-sm">
                     Back
                   </button>
                   <button
                     type="button"
-                    disabled={loading || !form.proof_image_url}
+                    disabled={loading || !form.proof_image_url || !!locationError}
                     onClick={handleSubmit}
                     className="btn-primary flex-1 cursor-pointer py-2 text-sm disabled:opacity-50"
                   >
@@ -402,6 +495,7 @@ export default function RaiseComplaint() {
                   type="button"
                   onClick={() => {
                     setForm({ category: "", custom_department: "", description: "", state: "", city: "", village: "", proof_image_url: "", gps_lat: null, gps_long: null, pincode: "" });
+                    setLocationError("");
                     setStep(1);
                   }}
                   className="btn-secondary cursor-pointer px-5 py-2 text-sm"

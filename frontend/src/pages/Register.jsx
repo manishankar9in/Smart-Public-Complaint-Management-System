@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { toast } from "react-toastify";
-import { Mail, Lock, Loader2, ArrowRight, MapPin, Phone, Briefcase, Navigation } from "lucide-react";
+import { Mail, Lock, Loader2, ArrowRight, MapPin, Phone, Briefcase, Navigation, Eye, EyeOff } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { WORKER_DEPARTMENTS } from "../data/dutyPositions";
 import { api, formatApiError } from "../utils/api";
@@ -44,6 +44,7 @@ const Register = () => {
   });
   const [customDepartment, setCustomDepartment] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [detectingGps, setDetectingGps] = useState(false);
   const { register } = useAuth();
 
@@ -353,15 +354,26 @@ const Register = () => {
                   <input
                     id={f.id}
                     name={f.name}
-                    type={f.type}
+                    type={f.name === "password" && showPassword ? "text" : f.type}
                     required
                     minLength={f.name === "password" ? 6 : undefined}
                     autoComplete={f.name === "password" ? "new-password" : f.name}
                     value={formData[f.name]}
                     onChange={handleChange}
-                    className="login-input min-h-[42px]"
+                    className={`login-input min-h-[42px] ${f.name === "password" ? "pr-11" : ""}`}
                     placeholder={f.placeholder}
                   />
+                  {f.name === "password" && (
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword((visible) => !visible)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-white/50 transition-colors hover:text-white focus:outline-none focus:ring-2 focus:ring-white/40"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      title={showPassword ? "Hide password" : "Show password"}
+                    >
+                      {showPassword ? <EyeOff size={16} aria-hidden /> : <Eye size={16} aria-hidden />}
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
